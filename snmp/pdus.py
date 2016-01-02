@@ -1,7 +1,8 @@
 from os import urandom
 
-from ber.enums import TagClassEnum, UniversalClassTags
-from ber.object import Object, ObjectTag, Null, ObjectIdentifier, Integer
+import snmp.mib
+from ber.enums import TagClassEnum
+from ber.object import Object, ObjectTag, Null, ObjectIdentifier, Integer, Sequence
 from snmp.enums import ErrorStatus
 
 
@@ -17,18 +18,19 @@ class PDU(Object):
     def __init__(self, tag=None, request_id=None, error_status=None, error_index=None, variable_bindings=None):
         if request_id is None:
             request_id = Integer(urandom(4)).get_object()
+        assert isinstance(request_id.value, Integer)
         self.request_id = request_id
+
         if error_status is None:
             error_status = Integer.from_int(ErrorStatus.no_error).get_object()
-        assert isinstance(error_status, Object)
+        assert isinstance(error_status.value, Integer)
         self.error_status = error_status
 
         if error_index is None:
             error_index = Integer.from_int(0).get_object()
-        assert isinstance(error_index, Object)
+        assert isinstance(error_index.value, Integer)
         self.error_index = error_index
 
-        # TODO: if variables_bindings is not None
         assert variable_bindings is not None
         self.variable_bindings = variable_bindings
 
@@ -40,34 +42,48 @@ class PDU(Object):
         assert isinstance(obj, Object)
         assert len(obj.value) == 4
         (request_id, error_status, error_index, variable_bindings) = obj.value
-        assert variable_bindings.tag.tag_class == TagClassEnum.universal
-        assert variable_bindings.tag.tag_id == UniversalClassTags.sequence_of
-        assert variable_bindings.tag.is_constructed
-        assert isinstance(variable_bindings.value, list)
-        # assert len(variable_bindings.value) == 1
-        # TODO: not sure if following applies, get bulk?
-        assert isinstance(variable_bindings.value[0].value, list) and len(variable_bindings.value[0].value) == 2
         return cls(obj.tag, request_id, error_status, error_index, variable_bindings)
 
     def __repr__(self):
-        return "<%s request_id=%s, error_status=%s, error_index=%s, variables_bindings=%s>" % (
+        return "%s={request_id: %s, error_status: %s, error_index: %s, variables_bindings: %s}" % (
             self.__class__.__name__, self.request_id, self.error_status, self.error_index, self.variable_bindings)
 
 
 class GetNextRequest(PDU):
     tag_id = 1
 
-    def __init__(self, oid=None):
-        if oid is None:
-            oid = '1.3.6.1.2.1'  # MIB system
-        # TODO: clean this up, variable_bindings to/from dict?
-        variable_bindings = Object(ObjectTag(TagClassEnum.universal, True, UniversalClassTags.sequence_of),
-                                   [Object(ObjectTag(TagClassEnum.universal, True, UniversalClassTags.sequence_of),
-                                           [ObjectIdentifier.from_string(oid).get_object(),
-                                            Null().get_object()])])
+    def __init__(self, *args, **kwargs):
+        PDU.__init__(self, *args, **kwargs)
+        oid = self.variable_bindings.value[0].value[0].value
+        assert isinstance(oid, ObjectIdentifier)
+        self.oid = oid
 
-        PDU.__init__(self, variable_bindings=variable_bindings)
+    @classmethod
+    def from_oid(cls, oid=None):
+        if oid is None:
+            oid = snmp.mib.system
+        if isinstance(oid, str):
+            oid = ObjectIdentifier.from_string(oid)
+        assert isinstance(oid, ObjectIdentifier)
+        variable_bindings = Sequence.from_list([Sequence.from_list([oid.get_object(), Null().get_object()])])
+        return cls(variable_bindings=variable_bindings)
+
+    def __repr__(self):
+        return "%s={request_id: %s, oid: %s]" % (self.__class__.__name__, self.request_id, self.oid)
 
 
 class GetResponse(PDU):
     tag_id = 2
+
+    def __init__(self, *args, **kwargs):
+        PDU.__init__(self, *args, **kwargs)
+        oid = self.variable_bindings.value[0].value[0].value
+        assert isinstance(oid, ObjectIdentifier)
+        self.oid = oid
+
+        response = self.variable_bindings.value[0].value[1]
+        self.response = response
+
+    def __repr__(self):
+        return "%s={request_id: %s, oid: %s, response: %s}" % (
+            self.__class__.__name__, self.request_id, self.oid, self.response)

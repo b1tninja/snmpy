@@ -35,9 +35,9 @@ class ObjectTag(object):
         return bytes(buffer)
 
     def __repr__(self):
-        return "(%s,%s,%s)" % (self.tag_class,
+        return "(%s,%s,%s)" % (self.tag_class.name,
                                "constructed" if self.is_constructed else "primitive",
-                               self.tag_id)
+                               self.tag_id.name if isinstance(self.tag_id, UniversalClassTags) else self.tag_id)
 
     @classmethod
     def decode(cls, buffer, offset=0):
@@ -185,7 +185,7 @@ class Object(object):
         return bytes(self.tag) + ObjectLength.encode(len(encoded_value)) + encoded_value
 
     def __repr__(self):
-        return "<%s tag=%s value=%s>" % (self.__class__.__name__, self.tag, self.value)
+        return "%s={%s: %s}" % (self.__class__.__name__, self.tag, self.value)
 
     @classmethod
     def decode(cls, buffer, offset=0):
@@ -206,3 +206,12 @@ class Object(object):
                 value = cls.universal_tags[tag.tag_id](value)
 
         return cls(tag, value), stop_octet
+
+
+class Sequence(Object):
+    tag_id = 16
+    is_constructed = True
+
+    @classmethod
+    def from_list(cls, value):
+        return cls(ObjectTag(TagClassEnum.universal, True, UniversalClassTags.sequence_of), value)

@@ -39,7 +39,5 @@ class SNMPDatagram(Object):
         return cls(version, community, pdu)
 
     def __repr__(self):
-        return "<%s version=%s, community=%s, pdu=%s>" % (
+        return "%s={version: %s, community: %s, pdu: %s}" % (
             self.__class__.__name__, self.version, self.community, self.pdu)
-
-# TODO: Implement PDUs, to better represent the context-specific tag (get-request, etc)
