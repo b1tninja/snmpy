@@ -1,4 +1,4 @@
-from os import urandom
+from random import randint
 
 import snmp.mib
 from ber.enums import TagClassEnum
@@ -6,6 +6,7 @@ from ber.object import Object, ObjectTag, Null, ObjectIdentifier, Integer, Seque
 from snmp.enums import ErrorStatus
 
 
+# TODO: PDU.get_object()
 class PDU(Object):
     tag_class = TagClassEnum.context_specific
     is_constructed = True
@@ -15,9 +16,14 @@ class PDU(Object):
     def get_object_tag(cls):
         return ObjectTag(cls.tag_class, cls.is_constructed, cls.tag_id)
 
+    def get_object(self):
+        assert self.tag_id is not None
+        return Object(self.get_object_tag(), self)
+
     def __init__(self, tag=None, request_id=None, error_status=None, error_index=None, variable_bindings=None):
         if request_id is None:
-            request_id = Integer(urandom(4)).get_object()
+            # TODO: when Integer() is fixed, use wider range of values
+            request_id = Integer.from_int(randint(1 << 24, 1 << 31)).get_object()
         assert isinstance(request_id.value, Integer)
         self.request_id = request_id
 
@@ -64,8 +70,12 @@ class GetNextRequest(PDU):
             oid = snmp.mib.system
         if isinstance(oid, str):
             oid = ObjectIdentifier.from_string(oid)
-        assert isinstance(oid, ObjectIdentifier)
-        variable_bindings = Sequence.from_list([Sequence.from_list([oid.get_object(), Null().get_object()])])
+        if isinstance(oid, ObjectIdentifier):
+            oid = oid.get_object()
+        else:
+            assert isinstance(oid, Object)
+            assert isinstance(oid.value, ObjectIdentifier)
+        variable_bindings = Sequence.from_list([Sequence.from_list([oid, Null().get_object()])])
         return cls(variable_bindings=variable_bindings)
 
     def __repr__(self):

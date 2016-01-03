@@ -1,4 +1,6 @@
+from binascii import b2a_hex
 from math import ceil, log2
+from string import printable
 
 from ber.enums import TagClassEnum, UniversalClassTags
 
@@ -146,7 +148,10 @@ class OctetString(ObjectValue):
     tag_id = 4
 
     def __str__(self):
-        return self.decode('ascii')
+        if set(self).issubset(set(map(ord, printable))):
+            return self.decode('ascii')
+        else:
+            return b2a_hex(self).decode('ascii')
 
     @classmethod
     def encode(cls, value):
@@ -155,6 +160,7 @@ class OctetString(ObjectValue):
 
 
 class Integer(ObjectValue):
+    # TODO: should be twos complement representation
     tag_id = 2
 
     def __int__(self):
