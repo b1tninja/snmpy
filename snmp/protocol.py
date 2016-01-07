@@ -7,9 +7,10 @@ from snmp.pdus import GetNextRequest, GetResponse
 
 
 class SNMPProtocol(asyncio.Protocol):
-    def __init__(self):
+    def __init__(self, db):
         self.transport = None
         self.requests = {}
+        self.db = db
 
     def connection_made(self, transport):
         self.transport = transport
@@ -55,25 +56,25 @@ class SNMPProtocol(asyncio.Protocol):
         return self.sendto(datagram, host, port)
 
     @asyncio.coroutine
-    def walk(self, host, oid=system, port=161, timeout=2):
-        # TODO: max retries
+    def walk(self, host, oid=system, port=161, timeout=2, retries=3):
+        # TODO: decouple the db, perhaps a callback for each GetResponse?
         datagram = SNMPDatagram(pdu=GetNextRequest.from_oid(oid))
-        end_of_mib = False
-        result = []
-        while not end_of_mib:
+        while retries > 0:
             future = self.sendto(datagram, host, port)
             try:
                 response = yield from asyncio.wait_for(future, timeout=2)
             except asyncio.TimeoutError:
-                print("Request timed out... resending")
+                retries -= 1
             else:
                 assert isinstance(response.pdu, GetResponse)
-                # print("Got response:", response.pdu.response)
+                # TODO: logger/debug levels
+                # print("Got response from:", host, response.pdu.response)
                 if datagram.pdu.oid == response.pdu.oid:
-                    return result
-                    # TODO: save to database?
+                    # end of mib condition
+                    return  # True?
                 else:
-                    result.append((response.pdu.oid, response.pdu.response))
-                    # print("Get-Next OID:", response.pdu.oid)
+                    yield from self.db.save_get_response(host, response.pdu.oid, response.pdu.response)
                     pdu = GetNextRequest.from_oid(response.pdu.oid)
                     datagram = SNMPDatagram(pdu=pdu)
+        else:
+            raise Exception('Maximum retries exceeded')
