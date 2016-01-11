@@ -1,16 +1,16 @@
 import asyncio
 import binascii
+import logging
 
 from snmp.datagram import SNMPDatagram
 from snmp.mib import system
-from snmp.pdus import GetNextRequest, GetResponse
+from snmp.pdus import GetNextRequest
 
 
 class SNMPProtocol(asyncio.Protocol):
-    def __init__(self, db):
+    def __init__(self):
         self.transport = None
         self.requests = {}
-        self.db = db
 
     def connection_made(self, transport):
         self.transport = transport
@@ -25,19 +25,18 @@ class SNMPProtocol(asyncio.Protocol):
             # TODO: implement object comparison/equivalence testing
             key = (host, datagram.pdu.request_id.value)
             if key in self.requests:
-                future = self.requests.pop(key)
-                future.set_result(datagram)
+                self.requests[key].set_result(datagram)
             else:
-                print("Unexpected SNMP datagram from:", host, datagram)
-                print(self.requests)
+                logging.warning("Unexpected SNMP datagram from %s: %s.", host, datagram)
+                logging.debug("%s", self.requests)
 
     def error_received(self, exc):
-        print('Error received:', exc)
+        logging.error(exc)
 
     def connection_lost(self, exc):
-        print("Socket closed, stop the event loop")
-        loop = asyncio.get_event_loop()
-        loop.stop()
+        logging.debug("Socket closed. Cancelling any pending futures")
+        for fut in self.requests.values():
+            fut.cancel()
 
     def sendto(self, datagram, host, port=161):
         assert isinstance(datagram, SNMPDatagram)
@@ -45,8 +44,10 @@ class SNMPProtocol(asyncio.Protocol):
         encoded = bytes(datagram)
         response = asyncio.Future()
         # print((host, datagram.pdu.request_id.value))
-        self.requests[(host, datagram.pdu.request_id.value)] = response
-        self.transport.sendto(encoded, (host, 161))
+        key = (host, datagram.pdu.request_id.value)
+        self.requests[key] = response
+        response.add_done_callback(lambda fn: self.requests.__delitem__(key) if key in self.requests else None)
+        self.transport.sendto(encoded, (host, port))
         # print("Sent:", binascii.hexlify(encoded))
         return response
 
@@ -55,26 +56,3 @@ class SNMPProtocol(asyncio.Protocol):
         datagram = SNMPDatagram(pdu=pdu)
         return self.sendto(datagram, host, port)
 
-    @asyncio.coroutine
-    def walk(self, host, oid=system, port=161, timeout=2, retries=3):
-        # TODO: decouple the db, perhaps a callback for each GetResponse?
-        datagram = SNMPDatagram(pdu=GetNextRequest.from_oid(oid))
-        while retries > 0:
-            future = self.sendto(datagram, host, port)
-            try:
-                response = yield from asyncio.wait_for(future, timeout=2)
-            except asyncio.TimeoutError:
-                retries -= 1
-            else:
-                assert isinstance(response.pdu, GetResponse)
-                # TODO: logger/debug levels
-                # print("Got response from:", host, response.pdu.response)
-                if datagram.pdu.oid == response.pdu.oid:
-                    # end of mib condition
-                    return  # True?
-                else:
-                    yield from self.db.save_get_response(host, response.pdu.oid, response.pdu.response)
-                    pdu = GetNextRequest.from_oid(response.pdu.oid)
-                    datagram = SNMPDatagram(pdu=pdu)
-        else:
-            raise Exception('Maximum retries exceeded')
