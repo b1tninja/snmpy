@@ -3,13 +3,10 @@ import asyncio
 import logging
 
 import asynqp
-
 from config import bind_host, bind_port
 from config import db_user, db_password, db_name, db_host, db_port
 from config import mq_user, mq_password, mq_exchange, mq_host, mq_port
 from snmp.database import Database
-from snmp.datagram import SNMPDatagram
-from snmp.pdus import GetNextRequest, GetResponse
 from snmp.protocol import SNMPProtocol
 
 # logging.basicConfig(level=logging.INFO)
@@ -43,7 +40,7 @@ class MessageQueue:
         if queue_size:
             yield from self.channel.set_qos(prefetch_count=queue_size)
         self.exchange = yield from self.channel.declare_exchange(exchange, 'direct', durable=True)
-        self.task_queue = yield from self.channel.declare_queue('tasks')
+        self.task_queue = yield from self.channel.declare_queue('tasks', durable=True)
         yield from self.task_queue.bind(self.exchange, 'pending_task')
 
     @asyncio.coroutine
@@ -61,16 +58,17 @@ class MessageQueue:
     def get_tasks(self, n):
         tasks = []
         for m in range(n):
-            message = yield from self.task_queue.get()
-            if message:
-                tasks.append(message)
+            try:
+                message = yield from self.task_queue.get()
+            except ConnectionError:
+                logging.error("Message queue is not connected!")
+                yield from asyncio.sleep(1)
             else:
-                break
+                if message:
+                    tasks.append(message)
+                else:
+                    break
         return tasks
-
-
-class ExceededRetries(Exception):
-    pass
 
 
 class SNMPWalk(object):
@@ -83,29 +81,6 @@ class SNMPWalk(object):
         self.db = db
 
     @asyncio.coroutine
-    def walk(self, host, oid=None, port=161, timeout=2, retries=3):
-        # TODO: decouple the db, perhaps a callback for each GetResponse?
-        datagram = SNMPDatagram(pdu=GetNextRequest.from_oid(oid))
-        while retries > 0:
-            future = self.snmp_protocol.sendto(datagram, host, port)
-            try:
-                response = yield from asyncio.wait_for(future, timeout=timeout)
-            except asyncio.TimeoutError:
-                retries -= 1
-            else:
-                assert isinstance(response.pdu, GetResponse)
-                logging.debug("Response from host %s: %s=%s", host, response.pdu.oid, response.pdu.response)
-                if datagram.pdu.oid == response.pdu.oid:
-                    # end of mib condition
-                    return
-                else:
-                    yield from self.db.save_get_response(host, response.pdu.oid, response.pdu.response)
-                    pdu = GetNextRequest.from_oid(response.pdu.oid)
-                    datagram = SNMPDatagram(pdu=pdu)
-        else:
-            raise ExceededRetries('Maximum retries exceeded')
-
-    @asyncio.coroutine
     def run(self, microthreads):
         tasks = {}
         try:
@@ -115,38 +90,48 @@ class SNMPWalk(object):
                     task_json = message.json()
                     # TODO: support other coros
                     assert task_json['coro'] == 'walk'
-                    (coro, args, kwargs) = self.walk, task_json['args'], task_json['kwargs']
-                    task = loop.create_task(asyncio.wait_for(coro(*args, **kwargs), timeout=600))
-                    tasks[task] = message
+                    (coro, args, kwargs) = self.snmp_protocol.walk, task_json['args'], task_json['kwargs']
+                    task = loop.create_task(asyncio.wait_for(coro(*args, **kwargs), timeout=3))
+                    task.add_done_callback(lambda result: message.ack())
+                    tasks[task] = (coro, args, kwargs)
 
                 (done, pending) = yield from asyncio.wait(list(tasks), return_when=asyncio.FIRST_COMPLETED)
-                # loop.run_forever()
+
                 for task in done:
+                    (coro, args, kwargs) = tasks.pop(task)
+                    (host,) = args
                     try:
-                        message = tasks.pop(task)
                         result = task.result()
                     except asyncio.TimeoutError:
-                        logging.warning("Task timed out: %s" % message.json())
-                    except ExceededRetries:
-                        logging.warning("Task exceeded maximum retry count:  %s" % message.json())
+                        logging.warning("Task timed out: %s" % host)
+                    except Exception as e:
+                        logging.error(e)
+                    # except ExceededRetries:
+                    #     # TODO: probably should just log the responses we did rx if any
+                    #     logging.warning("Task exceeded maximum retry count:  %s" % host)
                     else:
-                        logging.info("Finished task: %s" % message.json())
-                        message.ack()
-
-                messages = yield from mq.get_tasks(microthreads - len(tasks))
+                        if result:
+                            self.db.save_get_response(host, result)
+                        logging.info("Task finished: %s, %d responses." % (host, len(result)))
+                try:
+                    messages = yield from mq.get_tasks(microthreads - len(tasks))
+                except:
+                    messages = []
 
         finally:
             transport.close()
 
 
 if __name__ == '__main__':
-    simultaneous_hosts = 1000
+    simultaneous_hosts = 100
     loop = asyncio.get_event_loop()
+    logging.debug("Connecting to message queue")
     mq = MessageQueue()
     loop.run_until_complete(
             mq.setup(user=mq_user, password=mq_password, exchange=mq_exchange, host=mq_host, port=mq_port,
                      queue_size=simultaneous_hosts))
 
+    logging.debug("Connected to message queue")
     parser = argparse.ArgumentParser(description='Walks SNMP MIB for multiple hosts asynchrously, and saves responses.')
     parser.add_argument('--queue', action='store', help="File containing list of ip addresses.")
 

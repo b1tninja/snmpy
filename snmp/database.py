@@ -1,7 +1,6 @@
 import asyncio
 
 import aiopg
-
 from snmp.pdus import Object, ObjectIdentifier
 
 class Database:
@@ -21,7 +20,19 @@ class Database:
         assert isinstance(oid, ObjectIdentifier)
         assert isinstance(response, Object)
         with (yield from self.connection_pool.cursor()) as cursor:
-            # ret = yield from cursor.execute("WITH walk AS (INSERT INTO walks (host) VALUES (%s) RETURNING id) SELECT id from walk", (host,))
             yield from cursor.execute(
                     "INSERT INTO getresponse (host, object_identifier, tag, value) VALUES (%s, %s, %s, %s)",
                     (host, bytes(oid), bytes(response.tag), bytes(response.value)))
+
+    @asyncio.coroutine
+    def save_get_responses(self, host, responses):
+        # assert isinstance(host, str)
+        assert isinstance(responses, list)
+        for oid, response in responses:
+            assert isinstance(oid, ObjectIdentifier)
+            assert isinstance(response, Object)
+        with (yield from self.connection_pool.cursor()) as cursor:
+            # ret = yield from cursor.execute("WITH walk AS (INSERT INTO walks (host) VALUES (%s) RETURNING id) SELECT id from walk", (host,))
+            yield from cursor.executemany(
+                    "INSERT INTO getresponse (host, object_identifier, tag, value) VALUES (%s, %s, %s, %s)",
+                    [(host, bytes(oid), bytes(response.tag), bytes(response.value)) for oid, response in responses])
