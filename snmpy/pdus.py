@@ -1,16 +1,54 @@
 from random import randint
 
-from snmpy.asn1.enums import TagClassEnum
-from .asn1.ber import BERObject, BERObjectTag
-from snmpy.asn1 import Null, ObjectIdentifier, Integer, Sequence
-from .enums import ErrorStatus
+from .asn1 import TagClassEnum, UniversalClassTags
+from .asn1.ber import ASN1BERObject, BERObjectTag
+from .asn1.types import Null, ObjectIdentifier, Integer, Sequence
+from . import ErrorStatus
 
+#    IMPORTS
+#           ObjectName, ObjectSyntax, NetworkAddress, IpAddress, TimeTicks
+#                   FROM RFC1155-SMI;
+#
+#
+#      -- top-level message
+#
+#              Message ::=
+#                      SEQUENCE {
+#                           version        -- version-1 for this RFC
+#                              INTEGER {
+#                                  version-1(0)
+#                              },
+#
+#                          community      -- community name
+#                              OCTET STRING,
+#
+#                          data           -- e.g., PDUs if trivial
+#                              ANY        -- authentication is being used
+#                      }
+#
+#
+#              PDUs ::=
+#                      CHOICE {
+#                          get-request
+#                              GetRequest-PDU,
+#
+#                          get-next-request
+#                              GetNextRequest-PDU,
+#
+#                          get-response
+#                              GetResponse-PDU,
+#
+#                          set-request
+#                              SetRequest-PDU,
+#
+#                          trap
+#                              Trap-PDU
+#                           }
 
 # TODO: PDU.get_object()
-class PDU(BERObject):
+class PDU(ASN1BERObject):
     tag_class = TagClassEnum.context_specific
     is_constructed = True
-    tag_id = None
 
     @classmethod
     def get_object_tag(cls):
@@ -18,7 +56,7 @@ class PDU(BERObject):
 
     def get_object(self):
         assert self.tag_id is not None
-        return BERObject(self.get_object_tag(), self)
+        return ASN1BERObject(self.get_object_tag(), self)
 
     def __init__(self, tag=None, request_id=None, error_status=None, error_index=None, variable_bindings=None):
         if request_id is None:
@@ -40,12 +78,12 @@ class PDU(BERObject):
         assert variable_bindings is not None
         self.variable_bindings = variable_bindings
 
-        BERObject.__init__(self, self.get_object_tag() if tag is None else tag,
-                           [self.request_id, self.error_status, self.error_index, self.variable_bindings])
+        ASN1BERObject.__init__(self, self.get_object_tag() if tag is None else tag,
+                               [self.request_id, self.error_status, self.error_index, self.variable_bindings])
 
     @classmethod
     def from_object(cls, obj):
-        assert isinstance(obj, BERObject)
+        assert isinstance(obj, ASN1BERObject)
         assert len(obj.value) == 4
         (request_id, error_status, error_index, variable_bindings) = obj.value
         return cls(obj.tag, request_id, error_status, error_index, variable_bindings)
@@ -58,16 +96,17 @@ class PDU(BERObject):
 class GetNextRequest(PDU):
     tag_id = 1
 
-    def __init__(self, *args, **kwargs):
-        PDU.__init__(self, *args, **kwargs)
-        oid = self.variable_bindings.value[0].value[0].value
-        assert isinstance(oid, ObjectIdentifier)
-        self.oid = oid
-
-    @classmethod
-    def from_oid(cls, oid):
-        variable_bindings = Sequence.from_list([Sequence.from_list([ObjectIdentifier.as_object(oid), Null().get_object()])])
-        return cls(variable_bindings=variable_bindings)
+    def __new__(cls, oid: str, *args, **kwargs):
+        return cls(
+            Sequence(
+                [
+                    Sequence(
+                        [
+                            ObjectIdentifier(oid), Null()
+                        ],
+                    )
+                ]
+            ))
 
     def __repr__(self):
         return "%s={request_id: %s, oid: %s]" % (self.__class__.__name__, self.request_id, self.oid)

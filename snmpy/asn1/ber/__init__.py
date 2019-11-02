@@ -1,14 +1,26 @@
 from math import ceil, log2
 
 from .. import ObjectTag, Object
-from ..enums import TagClassEnum
+from snmpy.asn1 import TagClassEnum
 
+from typing import Iterable
+
+class byte(bytes):
+    def __new__(cls, *args, **kwargs):
+        return bytes(args)
 
 class BERObjectTag(ObjectTag):
     def __bytes__(self):
-        buffer = bytearray()
-        buffer.append(self.tag_class << 6 | self.is_constructed * 0b00100000 | min(0b00011111, self.tag_id))
-        if self.tag_id >= 0b00011111:
+        if self.tag_id < 31:
+            # Low-tag-number form.
+            # One octet.
+            # Bits 8 and 7 specify the class
+            # bit 6 has value "0," indicating that the encoding is primitive,
+            # and bits 5-1 give the tag number.
+            return byte(self.tag_class << 6 | 1 << 5 * self.is_constructed | self.tag_id)
+
+
+        elif self.tag_id >= 31:
             n = self.tag_id
             buffer.append(n & 0b01111111)
             while n >= 0b10000000:
@@ -34,10 +46,11 @@ class BERObjectTag(ObjectTag):
         return cls(tag_class, is_constructed, tag_id), offset
 
 
-class BERObject(Object):
+class ASN1BERObject(Object):
     def __bytes__(self):
-        encoded_value = b''.join(map(bytes, self.value)) if isinstance(self.value, list) else bytes(self.value)
+        encoded_value = bytes(self.value)
         return bytes(self.tag) + ObjectLength.encode(len(encoded_value)) + encoded_value
+
 
     @classmethod
     def decode(cls, buffer, offset=0):
@@ -60,14 +73,16 @@ class BERObject(Object):
         return cls(tag, value), stop_octet
 
 
+
 class ObjectLength:
     @staticmethod
-    def encode(length):
+    def encode(length: int):
         # TODO: indefinite form
-        assert not (length >> 128)  # maximum length of 2**(2**7)
+        assert length < 2**(2**7)  # maximum length of 2**(2**7)
         if length < 0b10000000:
             # short-form
             return bytes([length])
+            length.to_bytes()
         else:
             # long-form
             octets = ceil(log2(length) / 8)

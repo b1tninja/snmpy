@@ -1,43 +1,28 @@
-from snmpy.asn1.enums import TagClassEnum, UniversalClassTags
-from .asn1.ber import BERObject, BERObjectTag
-from snmpy.asn1 import OctetString, Integer
-from .enums import SNMPVersion
+from snmpy.asn1 import TagClassEnum, UniversalClassTags
+from .asn1.ber import ASN1BERObject, BERObjectTag
+from snmpy.asn1.types import OctetString, Integer
+from snmpy import SNMPVersion
 from .pdus import PDU
 
 from typing import Optional
 
-class SNMPDatagram(BERObject):
-    snmp_version: SNMPVersion
+class SNMPDatagram(ASN1BERObject):
+    snmp_version: SNMPVersion = None
+    _tag_constructed_ = True
+    _tag_id_ = UniversalClassTags.sequence_of
+    community = 'public'
 
-    pdus = dict([(pdu.tag_id, pdu) for pdu in PDU.__subclasses__()])
-
-    def __init__(self, payload: PDU, community: Optional[str] = 'public'):
-            community = OctetString(community).get_object()
-        if pdu is None:
-            pass
-
-
-        BERObject.__init__(self, BERObjectTag(TagClassEnum.universal, True, UniversalClassTags.sequence_of),
-                           [Integer.from_int(self.snmp_version).get_object(), community, pdu])
-
-        self.version = version
-        self.community = community
-        self.pdu = pdu
+    def __new__(cls, payload: PDU, community: Optional[str]):
+        return cls([Integer(cls.snmp_version), OctetString(community), payload])
 
     @classmethod
-    def decode(cls, buffer, offset=0):
-        """Decodes SNMP packet
-        :param buffer:
-        :param offset:
-        """
-        (obj, offset) = BERObject.decode(buffer, offset)
-        assert len(buffer) == offset
-        (version, community, pdu) = obj.value
-        assert pdu.tag.tag_class == TagClassEnum.context_specific
-        assert isinstance(community.value, OctetString)
-        if pdu.tag.tag_id in cls.pdus:
-            pdu = cls.pdus[pdu.tag.tag_id].from_object(pdu)
-        return cls(version, community, pdu)
+    def decode(cls, buffer: bytes, offset: int = 0):
+        assert len(buffer) > offset
+        # (obj, offset) = ASN1BERObject.decode(buffer, offset)
+        (version, community, pdu) = obj
+        assert pdu.tag_class == TagClassEnum.context_specific
+        assert isinstance(community, OctetString)
+        return cls(pdu, community)
 
     def __repr__(self):
         return "%s={version: %s, community: %s, pdu: %s}" % (

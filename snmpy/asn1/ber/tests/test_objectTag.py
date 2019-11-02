@@ -1,7 +1,6 @@
 from unittest import TestCase
 
-from ber.enums import TagClassEnum, UniversalClassTags
-from ber.object import ObjectTag
+from ... import TagClassEnum, UniversalClassTags, ObjectTag
 
 
 class TestObjectTag(TestCase):
