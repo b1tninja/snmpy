@@ -1,10 +1,11 @@
 from random import randint
 
-import snmp.mib
+from .mib import SystemOID
 from ber.enums import TagClassEnum
 from ber.object import Object, ObjectTag, Null, ObjectIdentifier, Integer, Sequence
 from snmp.enums import ErrorStatus
 
+from typing import Union, Optional
 
 # TODO: PDU.get_object()
 class PDU(Object):
@@ -65,17 +66,8 @@ class GetNextRequest(PDU):
         self.oid = oid
 
     @classmethod
-    def from_oid(cls, oid=None):
-        if oid is None:
-            oid = snmp.mib.system
-        if isinstance(oid, str):
-            oid = ObjectIdentifier.from_string(oid)
-        if isinstance(oid, ObjectIdentifier):
-            oid = oid.get_object()
-        else:
-            assert isinstance(oid, Object)
-            assert isinstance(oid.value, ObjectIdentifier)
-        variable_bindings = Sequence.from_list([Sequence.from_list([oid, Null().get_object()])])
+    def from_oid(cls, oid):
+        variable_bindings = Sequence.from_list([Sequence.from_list([ObjectIdentifier.as_object(oid), Null().get_object()])])
         return cls(variable_bindings=variable_bindings)
 
     def __repr__(self):

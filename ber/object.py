@@ -3,7 +3,7 @@ from math import ceil, log2
 from string import printable
 
 from ber.enums import TagClassEnum, UniversalClassTags
-
+import typing
 
 class ObjectTag(object):
     def __init__(self, tag_class, is_constructed, tag_id):
@@ -141,6 +141,11 @@ class ObjectIdentifier(ObjectValue):
                 oid.append(i)
                 i = 0
         return '.'.join(map(str, oid))
+
+    @classmethod
+    def as_object(cls, oid):
+        return cls(oid).get_object()
+
 
 
 class OctetString(ObjectValue):

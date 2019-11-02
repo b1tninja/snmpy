@@ -3,9 +3,9 @@ import logging
 
 import binascii
 
-from snmp.datagram import SNMPDatagram
-from snmp.mib import system
-from snmp.pdus import GetNextRequest, GetResponse
+from .datagram import SNMPDatagram
+from .mib import SystemOID
+from .pdus import GetNextRequest, GetResponse
 
 
 class ExceededRetries(Exception):
@@ -58,7 +58,7 @@ class SNMPProtocol(asyncio.Protocol):
         # print("Sent:", binascii.hexlify(encoded))
         return response
 
-    def get_next(self, host, oid=system, port=161):
+    def get_next(self, host, oid, port=161):
         """Creates GetNextResponse PDU / datagram and returns a Future"""
         pdu = GetNextRequest.from_oid(oid)
         datagram = SNMPDatagram(pdu=pdu)
