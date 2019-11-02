@@ -1,23 +1,24 @@
-from ber.enums import TagClassEnum, UniversalClassTags
-from ber.object import Object, ObjectTag, OctetString, Integer
-from snmp.enums import SNMPVersion
-from snmp.pdus import PDU
+from snmpy.asn1.enums import TagClassEnum, UniversalClassTags
+from .asn1.ber import BERObject, BERObjectTag
+from snmpy.asn1 import OctetString, Integer
+from .enums import SNMPVersion
+from .pdus import PDU
 
+from typing import Optional
 
-class SNMPDatagram(Object):
-    snmp_version = SNMPVersion.v1
+class SNMPDatagram(BERObject):
+    snmp_version: SNMPVersion
+
     pdus = dict([(pdu.tag_id, pdu) for pdu in PDU.__subclasses__()])
 
-    def __init__(self, version=None, community=None, pdu=None):
-        if version is None:
-            version = Integer.from_int(self.snmp_version).get_object()
-        if community is None:
-            community = OctetString(b'public').get_object()
+    def __init__(self, payload: PDU, community: Optional[str] = 'public'):
+            community = OctetString(community).get_object()
         if pdu is None:
             pass
 
-        Object.__init__(self, ObjectTag(TagClassEnum.universal, True, UniversalClassTags.sequence_of),
-                        [version, community, pdu])
+
+        BERObject.__init__(self, BERObjectTag(TagClassEnum.universal, True, UniversalClassTags.sequence_of),
+                           [Integer.from_int(self.snmp_version).get_object(), community, pdu])
 
         self.version = version
         self.community = community
@@ -29,7 +30,7 @@ class SNMPDatagram(Object):
         :param buffer:
         :param offset:
         """
-        (obj, offset) = Object.decode(buffer, offset)
+        (obj, offset) = BERObject.decode(buffer, offset)
         assert len(buffer) == offset
         (version, community, pdu) = obj.value
         assert pdu.tag.tag_class == TagClassEnum.context_specific
@@ -41,3 +42,6 @@ class SNMPDatagram(Object):
     def __repr__(self):
         return "%s={version: %s, community: %s, pdu: %s}" % (
             self.__class__.__name__, self.version, self.community, self.pdu)
+
+class SNMPv1Datagram(SNMPDatagram):
+    snmp_version = SNMPVersion.v1

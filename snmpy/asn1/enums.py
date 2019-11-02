@@ -23,8 +23,8 @@ class UniversalClassTags(IntEnum):
     embedded_pdv = 11
     utf8_string = 12
     realative_oid = 13
-    # reserved = 14
-    # reserved = 15
+    reserved_14 = 14
+    reserved_15 = 15
     sequence_of = 16
     set_of = 17
     numeric_string = 18

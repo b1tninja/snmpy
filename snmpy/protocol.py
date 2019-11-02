@@ -12,6 +12,7 @@ class ExceededRetries(Exception):
     pass
 
 class SNMPProtocol(asyncio.Protocol):
+
     def __init__(self):
         self.transport = None
         self.requests = {}
@@ -45,23 +46,14 @@ class SNMPProtocol(asyncio.Protocol):
         # for fut in self.requests.values():
         #     fut.cancel()
 
-    def sendto(self, datagram, host, port=161):
-        assert isinstance(datagram, SNMPDatagram)
-        # print("Sending %s:%d: %s" % (host, port, datagram))
-        encoded = bytes(datagram)
-        response = asyncio.Future()
-        # print((host, datagram.pdu.request_id.value))
-        key = (host, datagram.pdu.request_id.value)
-        self.requests[key] = response
-        response.add_done_callback(lambda fn: self.requests.__delitem__(key) if key in self.requests else None)
-        self.transport.sendto(encoded, (host, port))
-        # print("Sent:", binascii.hexlify(encoded))
-        return response
+    def get(self, oid):
 
-    def get_next(self, host, oid, port=161):
+
+    def get_next(self, oid):
         """Creates GetNextResponse PDU / datagram and returns a Future"""
         pdu = GetNextRequest.from_oid(oid)
         datagram = SNMPDatagram(pdu=pdu)
+        return SNMPDatagram()
         return self.sendto(datagram, host, port)
 
     @asyncio.coroutine
@@ -93,3 +85,4 @@ class SNMPProtocol(asyncio.Protocol):
         # else:
         #     raise ExceededRetries('Maximum retries exceeded')
         return responses
+

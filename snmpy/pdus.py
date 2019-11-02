@@ -1,25 +1,24 @@
 from random import randint
 
-from .mib import SystemOID
-from ber.enums import TagClassEnum
-from ber.object import Object, ObjectTag, Null, ObjectIdentifier, Integer, Sequence
-from snmp.enums import ErrorStatus
+from snmpy.asn1.enums import TagClassEnum
+from .asn1.ber import BERObject, BERObjectTag
+from snmpy.asn1 import Null, ObjectIdentifier, Integer, Sequence
+from .enums import ErrorStatus
 
-from typing import Union, Optional
 
 # TODO: PDU.get_object()
-class PDU(Object):
+class PDU(BERObject):
     tag_class = TagClassEnum.context_specific
     is_constructed = True
     tag_id = None
 
     @classmethod
     def get_object_tag(cls):
-        return ObjectTag(cls.tag_class, cls.is_constructed, cls.tag_id)
+        return BERObjectTag(cls.tag_class, cls.is_constructed, cls.tag_id)
 
     def get_object(self):
         assert self.tag_id is not None
-        return Object(self.get_object_tag(), self)
+        return BERObject(self.get_object_tag(), self)
 
     def __init__(self, tag=None, request_id=None, error_status=None, error_index=None, variable_bindings=None):
         if request_id is None:
@@ -41,12 +40,12 @@ class PDU(Object):
         assert variable_bindings is not None
         self.variable_bindings = variable_bindings
 
-        Object.__init__(self, self.get_object_tag() if tag is None else tag,
-                        [self.request_id, self.error_status, self.error_index, self.variable_bindings])
+        BERObject.__init__(self, self.get_object_tag() if tag is None else tag,
+                           [self.request_id, self.error_status, self.error_index, self.variable_bindings])
 
     @classmethod
     def from_object(cls, obj):
-        assert isinstance(obj, Object)
+        assert isinstance(obj, BERObject)
         assert len(obj.value) == 4
         (request_id, error_status, error_index, variable_bindings) = obj.value
         return cls(obj.tag, request_id, error_status, error_index, variable_bindings)
