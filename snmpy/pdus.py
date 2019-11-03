@@ -1,6 +1,6 @@
 from random import randint
 
-from .asn1 import TagClassEnum, UniversalClassTags
+from snmpy.asn1 import TagClassEnum, UniversalClassTags
 from .asn1.ber import ASN1BERObject, BERObjectTag
 from .asn1.types import Null, ObjectIdentifier, Integer, Sequence
 from . import ErrorStatus

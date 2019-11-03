@@ -12,7 +12,7 @@ class TestSNMPDatagram(TestCase):
                         '303302010004067075626c6963a2260204524470540201000201003018301606082b06010201010200060a2b06010401bf0803020a'])
 
         for buffer in examples:
-            datagram = SNMPDatagram(buffer)
+            datagram = SNMPDatagram.decode(buffer)
             print(datagram)
             # encoded = bytes(decoded)
             # TODO: __cmp__ or __hash__ perhaps

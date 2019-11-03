@@ -1,6 +1,7 @@
 from unittest import TestCase
 
-from ... import TagClassEnum, UniversalClassTags, ObjectTag
+from ... import ObjectTag
+from snmpy.asn1 import TagClassEnum, UniversalClassTags
 
 
 class TestObjectTag(TestCase):

@@ -1,8 +1,8 @@
 import string
 from math import ceil, log2
 
-from . import Object, BERObjectTag, ObjectTag
-from . import TagClassEnum, UniversalClassTags
+from . import Object,  ObjectTag
+from .enums import TagClassEnum, UniversalClassTags
 
 
 class Null(Object):

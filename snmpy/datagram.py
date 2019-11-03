@@ -1,10 +1,10 @@
-from snmpy.asn1 import TagClassEnum, UniversalClassTags
+from .asn1 import TagClassEnum, UniversalClassTags
 from .asn1.ber import ASN1BERObject, BERObjectTag
-from snmpy.asn1.types import OctetString, Integer
-from snmpy import SNMPVersion
+from .asn1.types import OctetString, Integer
+from . import SNMPVersion
 from .pdus import PDU
 
-from typing import Optional
+from typing import Optional, Union
 
 class SNMPDatagram(ASN1BERObject):
     snmp_version: SNMPVersion = None
@@ -12,13 +12,18 @@ class SNMPDatagram(ASN1BERObject):
     _tag_id_ = UniversalClassTags.sequence_of
     community = 'public'
 
-    def __new__(cls, payload: PDU, community: Optional[str]):
-        return cls([Integer(cls.snmp_version), OctetString(community), payload])
+    # def __new__(cls, payload: Union[PDU, ASN1BERObject, bytes], community: Optional[str]):
+    #     if not isinstance(payload, PDU):
+    #         payload = PDU(payload)
+    #
+    #     # TODO: Determine version
+    #
+    #     return cls([Integer(cls.snmp_version), OctetString(community), payload])
 
     @classmethod
     def decode(cls, buffer: bytes, offset: int = 0):
         assert len(buffer) > offset
-        # (obj, offset) = ASN1BERObject.decode(buffer, offset)
+        (obj, offset) = ASN1BERObject.decode(buffer, offset)
         (version, community, pdu) = obj
         assert pdu.tag_class == TagClassEnum.context_specific
         assert isinstance(community, OctetString)

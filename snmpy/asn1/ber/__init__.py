@@ -1,7 +1,7 @@
 from math import ceil, log2
 
 from .. import ObjectTag, Object
-from snmpy.asn1 import TagClassEnum
+from ..enums import TagClassEnum
 
 from typing import Iterable
 
@@ -43,6 +43,8 @@ class BERObjectTag(ObjectTag):
             else:
                 tag_id |= buffer[offset]  # & 0b01111111
         offset += 1
+
+        # TODO: return metaclass for Object type
         return cls(tag_class, is_constructed, tag_id), offset
 
 
