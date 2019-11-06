@@ -1,11 +1,16 @@
 from enum import IntEnum
 
+class TagEncoding:
+    pass
 
 class TagClassEnum(IntEnum):
     universal = 0
     application = 1
     context_specific = 2
     private = 3
+
+class TagStructure:
+    passs
 
 
 class UniversalClassTags(IntEnum):

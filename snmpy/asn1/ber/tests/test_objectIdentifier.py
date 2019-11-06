@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from ...types import ObjectIdentifier
+from ...types import ASN1ObjectIdentifier
 
 
 class TestObjectIdentifier(TestCase):

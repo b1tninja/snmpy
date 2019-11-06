@@ -1,12 +1,12 @@
 from .asn1 import TagClassEnum, UniversalClassTags
-from .asn1.ber import ASN1BERObject, BERObjectTag
+from .asn1.ber import ASN1BERASN1Object, BERObjectTag
 from .asn1.types import OctetString, Integer
 from . import SNMPVersion
 from .pdus import PDU
 
 from typing import Optional, Union
 
-class SNMPDatagram(ASN1BERObject):
+class SNMPDatagram(ASN1BERASN1Object):
     snmp_version: SNMPVersion = None
     _tag_constructed_ = True
     _tag_id_ = UniversalClassTags.sequence_of
@@ -23,7 +23,7 @@ class SNMPDatagram(ASN1BERObject):
     @classmethod
     def decode(cls, buffer: bytes, offset: int = 0):
         assert len(buffer) > offset
-        (obj, offset) = ASN1BERObject.decode(buffer, offset)
+        (obj, offset) = ASN1BERASN1Object.decode(buffer, offset)
         (version, community, pdu) = obj
         assert pdu.tag_class == TagClassEnum.context_specific
         assert isinstance(community, OctetString)

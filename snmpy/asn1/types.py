@@ -1,18 +1,18 @@
 import string
 from math import ceil, log2
 
-from . import Object,  ObjectTag
+from . import ASN1Object,  ObjectTag
 from .enums import TagClassEnum, UniversalClassTags
 
 
-class Null(Object):
+class Null(ASN1Object):
     tag_id = UniversalClassTags.null
 
 
 from typing import Union, SupportsBytes, Sized, Iterable, ByteString
 
 
-class ObjectIdentifier(Object):
+class ASN1ObjectIdentifier(ASN1Object):
     tag_id = UniversalClassTags.object_identifier
 
     def __new__(cls, oid: str, *args, **kwargs):
@@ -50,7 +50,7 @@ class ObjectIdentifier(Object):
         return '.'.join(map(str, oid))
 
 
-class OctetString(Object):
+class OctetString(ASN1Object):
     tag = UniversalClassTags.octet_string
 
     def __str__(self):
@@ -68,7 +68,7 @@ class OctetString(Object):
         return cls(value.encode('ascii'))
 
 
-class Integer(Object):
+class Integer(ASN1Object):
     tag_id = UniversalClassTags.integer
 
     def __int__(self):
@@ -84,7 +84,7 @@ class Integer(Object):
         return cls(value.to_bytes(1 if value == 0 else ceil(log2(value) / 8), byteorder='big'))
 
 
-class Sequence(Object):
+class Sequence(ASN1Object):
 
     tag_id = UniversalClassTags.sequence_of
     is_constructed = True

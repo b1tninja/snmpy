@@ -1,6 +1,6 @@
 from math import ceil, log2
 
-from .. import ObjectTag, Object
+from .. import ObjectTag, ASN1Object
 from ..enums import TagClassEnum
 
 from typing import Iterable
@@ -48,7 +48,7 @@ class BERObjectTag(ObjectTag):
         return cls(tag_class, is_constructed, tag_id), offset
 
 
-class ASN1BERObject(Object):
+class ASN1BERASN1Object(ASN1Object):
     def __bytes__(self):
         encoded_value = bytes(self.value)
         return bytes(self.tag) + ObjectLength.encode(len(encoded_value)) + encoded_value
