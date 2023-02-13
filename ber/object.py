@@ -110,6 +110,9 @@ class Null(ObjectValue):
 class ObjectIdentifier(ObjectValue):
     tag_id = 6
 
+    # TODO: make a string by default and then offer a __bytes__
+    # TODO: OIDs should be sortable
+
     @classmethod
     def from_string(cls, oid):
         ids = list(map(int, oid.split('.')))

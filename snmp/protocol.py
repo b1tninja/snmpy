@@ -3,9 +3,10 @@ import logging
 
 import binascii
 
-from snmp.datagram import SNMPDatagram
-from snmp.mib import system
-from snmp.pdus import GetNextRequest, GetResponse
+from . import DEFAULT_PORT
+from .datagram import SNMPDatagram
+from .mib import system, sysDescr
+from .pdus import GetRequest, GetNextRequest, GetResponse
 
 
 class ExceededRetries(Exception):
@@ -58,14 +59,20 @@ class SNMPProtocol(asyncio.Protocol):
         # print("Sent:", binascii.hexlify(encoded))
         return response
 
-    def get_next(self, host, oid=system, port=161):
+    def get(self, host, oid=sysDescr, port=DEFAULT_PORT):
+        """Creates GetResponse PDU / datagram and returns a Future"""
+        pdu = GetRequest.from_oid(oid)
+        datagram = SNMPDatagram(pdu=pdu)
+        return self.sendto(datagram, host, port)
+
+    def get_next(self, host, oid=system, port=DEFAULT_PORT):
         """Creates GetNextResponse PDU / datagram and returns a Future"""
         pdu = GetNextRequest.from_oid(oid)
         datagram = SNMPDatagram(pdu=pdu)
         return self.sendto(datagram, host, port)
 
     @asyncio.coroutine
-    def walk(self, host, starting_oid=None, port=161, timeout=10, max_initial_failures=1, max_consequtive_failures=3):
+    def walk(self, host, starting_oid=None, port=DEFAULT_PORT, timeout=10, max_initial_failures=1, max_consequtive_failures=3):
         """Walks the MIB from the given starting oid, returns a list of (oid, object) tuples"""
         # TODO: perhaps an OrderedDict is more appropriate?
         responses = []

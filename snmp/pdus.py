@@ -55,9 +55,7 @@ class PDU(Object):
             self.__class__.__name__, self.request_id, self.error_status, self.error_index, self.variable_bindings)
 
 
-class GetNextRequest(PDU):
-    tag_id = 1
-
+class RequestPDU(PDU):
     def __init__(self, *args, **kwargs):
         PDU.__init__(self, *args, **kwargs)
         oid = self.variable_bindings.value[0].value[0].value
@@ -80,6 +78,14 @@ class GetNextRequest(PDU):
 
     def __repr__(self):
         return "%s={request_id: %s, oid: %s]" % (self.__class__.__name__, self.request_id, self.oid)
+
+
+class GetRequest(RequestPDU):
+    tag_id = 0
+
+
+class GetNextRequest(RequestPDU):
+    tag_id = 1
 
 
 class GetResponse(PDU):
