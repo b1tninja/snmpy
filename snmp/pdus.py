@@ -6,7 +6,6 @@ from ber.object import Object, ObjectTag, Null, ObjectIdentifier, Integer, Seque
 from snmp.enums import ErrorStatus
 
 
-# TODO: PDU.get_object()
 class PDU(Object):
     tag_class = TagClassEnum.context_specific
     is_constructed = True
@@ -55,7 +54,7 @@ class PDU(Object):
             self.__class__.__name__, self.request_id, self.error_status, self.error_index, self.variable_bindings)
 
 
-class RequestPDU(PDU):
+class Request(PDU):
     def __init__(self, *args, **kwargs):
         PDU.__init__(self, *args, **kwargs)
         oid = self.variable_bindings.value[0].value[0].value
@@ -80,11 +79,11 @@ class RequestPDU(PDU):
         return "%s={request_id: %s, oid: %s]" % (self.__class__.__name__, self.request_id, self.oid)
 
 
-class GetRequest(RequestPDU):
+class GetRequest(Request):
     tag_id = 0
 
 
-class GetNextRequest(RequestPDU):
+class GetNextRequest(Request):
     tag_id = 1
 
 

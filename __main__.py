@@ -4,7 +4,6 @@ import logging
 import sys
 
 from snmp import DEFAULT_PORT
-
 from snmp.protocol import SNMPProtocol
 
 
@@ -28,13 +27,11 @@ def get(host='127.0.0.1', oid=None, port=DEFAULT_PORT):
 
 
 if __name__ == '__main__':
-
     logger = logging.getLogger()
 
     parser = argparse.ArgumentParser(description='snmpy')
     parser.add_argument('-H', '--host', default='127.0.0.1')
     parser.add_argument('-P', '--port', type=int, default=DEFAULT_PORT)
-
     parser.add_argument('oid', nargs='?', help='Object Identifier')
     try:
         args = parser.parse_args()
