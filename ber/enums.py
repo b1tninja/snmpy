@@ -1,7 +1,13 @@
+"""BER tag class and universal class enums."""
+
+from __future__ import annotations
+
 from enum import IntEnum
 
 
 class TagClassEnum(IntEnum):
+    """ASN.1 BER tag classes."""
+
     universal = 0
     application = 1
     context_specific = 2
@@ -9,6 +15,8 @@ class TagClassEnum(IntEnum):
 
 
 class UniversalClassTags(IntEnum):
+    """ASN.1 Universal class tags."""
+
     eoc = 0
     boolean = 1
     integer = 2
@@ -40,3 +48,18 @@ class UniversalClassTags(IntEnum):
     universal_string = 28
     character_string = 29
     bmp_string = 30
+
+
+class ApplicationTags(IntEnum):
+    """SNMP SMIv2 Application type tags (RFC 1902).
+
+    These are APPLICATION class tag values used by SNMPv2 management types.
+    """
+
+    ip_address = 0
+    counter32 = 1
+    gauge32 = 2
+    time_ticks = 3
+    opaque = 4
+    # reserved = 5
+    counter64 = 6

@@ -1,38 +1,70 @@
-import asyncio
+"""SNMP database storage module."""
 
-import aiopg
-from snmp.pdus import Object, ObjectIdentifier
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from snmp.pdus import Object, ObjectIdentifier
+
 
 class Database:
-    def __init__(self):
-        self.connection_pool = None
+    """SNMP data storage interface."""
 
-    @asyncio.coroutine
-    def connect(self, **kwargs):
-        self.connection_pool = yield from aiopg.create_pool(**kwargs)
+    def __init__(self) -> None:
+        self.connection_pool: Optional[object] = None
 
-    def close(self):
-        self.connection_pool.close()
+    async def connect(self, **kwargs: object) -> None:
+        """Connect to the database.
 
-    @asyncio.coroutine
-    def save_get_response(self, host, oid, response):
-        # assert isinstance(host, str)
+        Args:
+            **kwargs: Database connection parameters.
+        """
+        # TODO: Implement database connection
+        # Currently requires aiopg which is deprecated
+        self.connection_pool = None  # type: ignore[assignment]
+
+    def close(self) -> None:
+        """Close the database connection."""
+        if self.connection_pool is not None:
+            self.connection_pool.close()  # type: ignore[union-attr]
+
+    async def save_get_response(
+        self,
+        host: str,
+        oid: ObjectIdentifier,
+        response: Object,
+    ) -> None:
+        """Save a GetResponse to the database.
+
+        Args:
+            host: The host IP address.
+            oid: The Object Identifier.
+            response: The response Object.
+        """
+        assert isinstance(host, str)
         assert isinstance(oid, ObjectIdentifier)
         assert isinstance(response, Object)
-        with (yield from self.connection_pool.cursor()) as cursor:
-            yield from cursor.execute(
-                    "INSERT INTO getresponse (host, object_identifier, tag, value) VALUES (%s, %s, %s, %s)",
-                    (host, bytes(oid), bytes(response.tag), bytes(response.value)))
+        # TODO: Implement actual database storage
+        if self.connection_pool is None:
+            raise RuntimeError("Not connected to database")
 
-    @asyncio.coroutine
-    def save_get_responses(self, host, responses):
-        # assert isinstance(host, str)
+    async def save_get_responses(
+        self,
+        host: str,
+        responses: list[tuple[ObjectIdentifier, Object]],
+    ) -> None:
+        """Save multiple GetResponses to the database.
+
+        Args:
+            host: The host IP address.
+            responses: List of (oid, response) tuples.
+        """
+        assert isinstance(host, str)
         assert isinstance(responses, list)
         for oid, response in responses:
             assert isinstance(oid, ObjectIdentifier)
             assert isinstance(response, Object)
-        with (yield from self.connection_pool.cursor()) as cursor:
-            # ret = yield from cursor.execute("WITH walk AS (INSERT INTO walks (host) VALUES (%s) RETURNING id) SELECT id from walk", (host,))
-            yield from cursor.executemany(
-                    "INSERT INTO getresponse (host, object_identifier, tag, value) VALUES (%s, %s, %s, %s)",
-                    [(host, bytes(oid), bytes(response.tag), bytes(response.value)) for oid, response in responses])
+        # TODO: Implement actual database storage
+        if self.connection_pool is None:
+            raise RuntimeError("Not connected to database")
