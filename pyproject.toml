@@ -1,13 +1,15 @@
 [build-system]
-requires = ["setuptools>=69.0", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "snmpy"
-version = "1.0.0"
+dynamic = ["version"]
 description = "A Python3 SNMP library built with asyncio"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["snmp", "snmpv3", "asyncio", "monitoring", "networking", "ber", "asn1"]
 requires-python = ">=3.12"
 authors = [
     {name = "snmpy Contributors"}
@@ -15,13 +17,22 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Networking",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/b1tninja/snmpy"
+Repository = "https://github.com/b1tninja/snmpy"
+Issues = "https://github.com/b1tninja/snmpy/issues"
 
 [project.optional-dependencies]
 crypto = [
@@ -39,8 +50,16 @@ examples = [
 [project.scripts]
 snmpy = "snmpy:main"
 
+[tool.setuptools.dynamic]
+version = {attr = "snmpy.__version__"}
+
 [tool.setuptools.packages.find]
 include = ["snmp*", "ber*", "masscan*"]
+
+# PEP 561 markers plus the hand-written stubs in snmp/.
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+snmp = ["*.pyi"]
 
 [tool.ruff]
 target-version = "py312"
@@ -58,6 +77,7 @@ python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+files = ["snmp", "ber", "snmpy", "masscan"]
 
 [tool.pytest.ini_options]
-testpaths = ["snmp", "ber"]
+testpaths = ["snmp", "ber", "snmpy", "masscan"]

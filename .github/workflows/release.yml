@@ -1,0 +1,112 @@
+# Release pipeline: push a tag named v<version> and this workflow builds the
+# sdist + wheel once, signs SLSA build provenance for them with Sigstore, and
+# attaches those exact files to a GitHub Release.
+#
+# Publishing to PyPI is intentionally NOT wired up yet: the `snmpy` name on
+# PyPI has been held by an unrelated project since 2016. When a distribution
+# name is settled, add a `publish` job that downloads the `dist` artifact and
+# uses pypa/gh-action-pypi-publish@release/v1 with Trusted Publishing
+# (permissions: id-token: write, plus a `pypi` GitHub environment so releases
+# can require reviewer approval). That action also generates and uploads the
+# PyPI-side attestations automatically.
+#
+# Verify a downloaded asset with the GitHub CLI:
+#   gh attestation verify snmpy-<version>-py3-none-any.whl --repo <owner>/snmpy
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and attest distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write # required by actions/attest
+      id-token: write # short-lived Sigstore signing identity
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Check the tag against the project version
+        run: |
+          version="$(python - <<'PY'
+          import pathlib, re
+          src = pathlib.Path("snmpy/__init__.py").read_text()
+          print(re.search(r'__version__ = "(.*)"', src).group(1))
+          PY
+          )"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag version=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match snmpy.__version__ (${version})"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check dist/*
+
+      - name: Generate build provenance attestations
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+  github-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--verify-tag --generate-notes --title "${GITHUB_REF_NAME}")
+          case "${GITHUB_REF_NAME}" in
+            *-*) args+=(--prerelease) ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" "${args[@]}" dist/*
+
+      - name: Provenance verification hint
+        run: |
+          {
+            echo "## Release provenance"
+            echo
+            echo "Assets were built by this workflow run and signed with Sigstore."
+            echo "To confirm a downloaded wheel came from this repository:"
+            echo
+            echo '```bash'
+            echo "gh attestation verify snmpy-${GITHUB_REF_NAME#v}-py3-none-any.whl --repo ${GITHUB_REPOSITORY}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

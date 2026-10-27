@@ -8,10 +8,23 @@ Requires Python ≥ 3.12.
 
 ## Install
 
+For development (this repo):
+
 ```bash
 pip install -e .            # library
 pip install -e ".[dev]"     # + ruff, mypy, pytest
 ```
+
+To consume it as a dependency, install from a tagged release — the name
+`snmpy` on PyPI belongs to an unrelated project, so nothing is published
+there:
+
+```bash
+pip install "snmpy @ git+https://github.com/b1tninja/snmpy.git@v1.0.0"
+```
+
+Optional extras: `crypto` (cryptography, for SNMPv3 privacy),
+`examples` (psutil, used by `examples/server.py`).
 
 ## Quick start — `Session` (blocking, simplest)
 
@@ -94,13 +107,36 @@ Examples in `examples/` (`trap_demo.py`, `bulk_demo.py`, `server.py`).
 ## Tests & lint
 
 ```bash
-python -m pytest            # 80 tests, incl. loopback UDP integration
-python -m ruff check snmp ber snmpy
-python -m mypy snmp         # strict-ish (see pyproject)
+python -m pytest            # 154 tests + 102 subtests, incl. loopback UDP integration
+python -m ruff check .      # ~875 findings today — see CI's advisory report
+python -m mypy              # ~379 errors today (targets come from pyproject)
 ```
+
+Both static tools are wired into CI as a **non-blocking** `quality` job that
+publishes the current counts to the run summary; the test matrix and the
+sdist/wheel build are blocking. Flip `continue-on-error` in
+`.github/workflows/ci.yml` once either count reaches zero.
 
 Integration tests (`snmp/test_session.py`) run a threaded in-process
 mini agent on 127.0.0.1 — no network or SNMP service required.
+
+## Releases
+
+Version lives in `snmpy/__init__.py` (`__version__`) and is read by
+setuptools at build time, so bump it there only. To ship:
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+`.github/workflows/release.yml` then verifies the tag matches
+`__version__`, builds the sdist + wheel once, signs **SLSA build
+provenance** with Sigstore (`actions/attest`), and attaches the artifacts
+to a GitHub Release. Confirm a downloaded asset came from this repo:
+
+```bash
+gh attestation verify snmpy-1.0.1-py3-none-any.whl --repo b1tninja/snmpy
+```
 
 ## Repository layout
 

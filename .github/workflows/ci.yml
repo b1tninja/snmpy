@@ -1,0 +1,144 @@
+# Continuous integration.
+#
+# Blocking: the test matrix (Linux + Windows, since the transport is asyncio
+# UDP and developers work on both) and a real sdist/wheel build that is then
+# installed into a clean venv and smoke-tested.
+#
+# Advisory: `quality` reports ruff/mypy counts without failing the run. The
+# repo carries a legacy backlog (~870 ruff and ~380 mypy findings across
+# snmp/, ber/, snmpy/, masscan/, examples/), so switching it to blocking would
+# turn every PR red. Set continue-on-error: false once both reach zero.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (py${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  build:
+    name: Build and check distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check dist/*
+
+      - name: Smoke-test the wheel in a clean venv
+        run: |
+          python -m venv .venv-smoke
+          .venv-smoke/bin/python -m pip install --quiet dist/*.whl
+          .venv-smoke/bin/python -c "import ber, masscan, snmp, snmpy; print('installed snmpy', snmpy.__version__)"
+          .venv-smoke/bin/snmpy --help > /dev/null
+          .venv-smoke/bin/python - <<'PY'
+          import pathlib, sys
+          import snmp
+
+          marker = pathlib.Path(snmp.__file__).parent / "py.typed"
+          if not marker.is_file():
+              sys.exit(f"PEP 561 marker missing from wheel: {marker}")
+          print("py.typed shipped")
+          PY
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: dist-ci
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  quality:
+    name: Lint and type-check (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project and dev tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff
+        if: always()
+        run: |
+          set -o pipefail
+          python -m ruff check . --output-format=concise | tee ruff.txt
+
+      - name: Mypy
+        if: always()
+        run: |
+          set -o pipefail
+          python -m mypy | tee mypy.txt
+
+      - name: Publish counts to the run summary
+        if: always()
+        run: |
+          {
+            echo "## Static analysis (advisory, not gating)"
+            echo ""
+            echo "* ruff findings: $(wc -l < ruff.txt 2>/dev/null || echo 0)"
+            echo "* mypy errors: $(grep -c ': error:' mypy.txt 2>/dev/null || echo 0)"
+            echo ""
+            echo 'Most frequent ruff rules:'
+            echo ""
+            echo '```text'
+            sed -E 's/.* ([A-Z]+[0-9]+) .*/\1/' ruff.txt 2>/dev/null | sort | uniq -c | sort -rn | head -n 10
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
