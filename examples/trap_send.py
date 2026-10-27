@@ -24,7 +24,7 @@ from snmp.pdus import Trap, SNMPv2Trap
 from snmp.enums import SNMPVersion
 
 
-async def send_all_snmpv1_traps(manager: TrapManager, receptor: "_LocalTrapReceptor") -> None:
+async def send_all_snmpv1_traps(manager: TrapManager, receptor: TrapReceptor) -> None:
     """Send all 5 SNMPv1 trap types via SNMPv1 Trap-PDU.
 
     Uses Trap.from_trap_type directly with simple integer values for
@@ -128,7 +128,7 @@ async def send_all_snmpv1_traps(manager: TrapManager, receptor: "_LocalTrapRecep
     print("  5. Sent authenticationFailure trap")
 
 
-async def send_snmpv2_traps(receptor: "_LocalTrapReceptor") -> None:
+async def send_snmpv2_traps(receptor: TrapReceptor) -> None:
     """Send SNMPv2-Trap-PDU traps directly to receptor."""
     print("\n  --- Sending SNMPv2-Trap-PDU Traps ---")
     from snmp.datagram import SNMPDatagram
