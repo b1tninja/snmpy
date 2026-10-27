@@ -11,6 +11,7 @@ OID arithmetic verified against the RFC 3805 SMI module (§6):
     printmib          ::= { mib-2 43 }      1.3.6.1.2.1.43
     prtGeneral        ::= { printmib 5 }    prtGeneralTable .43.5.1
       prtGeneralPrinterName ::= { prtGeneralEntry 16 }  (idx hrDeviceIndex)
+      prtGeneralSerialNumber ::= { prtGeneralEntry 17 } (idx hrDeviceIndex)
     prtCover          ::= { printmib 6 }    prtCoverTable .43.6.1.1
     prtInput          ::= { printmib 8 }    prtInputTable .43.8.2.1
       prtInputDesc         ::= { prtInputEntry 3 }
@@ -21,11 +22,16 @@ OID arithmetic verified against the RFC 3805 SMI module (§6):
       prtMarkerLifeCount   ::= { prtMarkerEntry 4 }  (idx hrDeviceIndex,
                                                       prtMarkerIndex)
     prtMarkerSupplies ::= { printmib 11 }   table .43.11.1.1
-      type/lvl/desc        ::= { prtMarkerSuppliesEntry 5/7/11 }
+      type/desc/max/lvl    ::= { prtMarkerSuppliesEntry 5/6/8/9 }
+      (entry 7 is prtMarkerSuppliesSupplyUnit, not a level)
+    prtConsoleDisplayBuffer ::= { printmib 16 }   table .43.16.5.1
+      prtConsoleDisplayBufferText ::= { prtConsoleDisplayBufferEntry 2 }
 
 The two ``hr*`` leaves come from the HOST-RESOURCES MIB (RFC 2790);
 Printer MIB tables are indexed by ``hrDeviceIndex``, so they are the
-practical companion for device status / serial lookups.
+practical companions for device status / type lookups.  RFC 2790 has no
+serial-number object (hrDeviceTable stops at hrDeviceErrors, entry 6), so
+serials come from ``prtGeneralSerialNumber`` or an IEEE 1284.1 device ID.
 """
 
 from __future__ import annotations
@@ -55,9 +61,15 @@ PRINTER = OidPack(
         Oid("prtGeneralPrinterName", f"{_43}.5.1.1.16.1",
             syntax="DisplayString", access="rw", scalar=True,
             doc="Printer name (prtGeneralPrinterName.1)"),
+        Oid("prtGeneralSerialNumber", f"{_43}.5.1.1.17.1",
+            syntax="OCTET STRING", access="ro", scalar=True,
+            doc="Serial number (prtGeneralSerialNumber.1, RFC 3805 entry 17)"),
         Oid("prtMarkerLifeCount", f"{_43}.10.2.1.4.1.1",
             syntax="Counter32", access="ro", scalar=True,
             doc="Lifetime page count (marker 1 on device 1)"),
+        Oid("prtConsoleDisplayBufferText", f"{_43}.16.5.1.2",
+            syntax="DisplayString", access="ro",
+            doc="Operator panel line (walk) — e.g. 'Sleep'"),
         # -- Table columns of interest (walk) --------------------------
         Oid("prtInputDesc", f"{_43}.8.2.1.3",
             syntax="DisplayString", access="rw",
@@ -74,20 +86,20 @@ PRINTER = OidPack(
         Oid("prtMarkerSuppliesType", f"{_43}.11.1.1.5",
             syntax="PrtMarkerSuppliesTypeTC", access="ro",
             doc="Supply type, e.g. toner(4)/ink(11) (walk)"),
-        Oid("prtMarkerSuppliesLevel", f"{_43}.11.1.1.7",
-            syntax="Integer32", access="ro",
-            doc="Supply level, -2 = low / -3 = unknown (walk)"),
-        Oid("prtMarkerSuppliesDescription", f"{_43}.11.1.1.11",
+        Oid("prtMarkerSuppliesDescription", f"{_43}.11.1.1.6",
             syntax="DisplayString", access="rw",
             doc="Supply description, e.g. 'Black Toner Cartridge' (walk)"),
+        Oid("prtMarkerSuppliesMaxCapacity", f"{_43}.11.1.1.8",
+            syntax="Integer32", access="ro",
+            doc="Full-supply capacity; -2 = unknown (walk)"),
+        Oid("prtMarkerSuppliesLevel", f"{_43}.11.1.1.9",
+            syntax="Integer32", access="ro",
+            doc="Supply level, -2 = low / -3 = unknown (walk)"),
         # -- HOST-RESOURCES companions (RFC 2790) ----------------------
         Oid("hrPrinterStatus", "1.3.6.1.2.1.25.3.5.1.1",
             syntax="Integer", access="ro",
             doc="Device status: other(1) none(2) running(3) warmUp(4) "
                 "dormant(5) interrupted(6) — RFC 2790"),
-        Oid("hrDeviceSerialNumber", "1.3.6.1.2.1.25.3.5.1.18",
-            syntax="OCTET STRING", access="ro",
-            doc="Device serial number (RFC 2790 hrDeviceTable)"),
     ],
 )
 register_pack(PRINTER)
@@ -99,24 +111,27 @@ prtInputTable = PRINTER["prtInputTable"]
 prtMarkerTable = PRINTER["prtMarkerTable"]
 prtMarkerSuppliesTable = PRINTER["prtMarkerSuppliesTable"]
 prtGeneralPrinterName = PRINTER["prtGeneralPrinterName"]
+prtGeneralSerialNumber = PRINTER["prtGeneralSerialNumber"]
 prtMarkerLifeCount = PRINTER["prtMarkerLifeCount"]
+prtConsoleDisplayBufferText = PRINTER["prtConsoleDisplayBufferText"]
 prtInputDesc = PRINTER["prtInputDesc"]
 prtInputCurrentLevel = PRINTER["prtInputCurrentLevel"]
 prtMarkerMarkTech = PRINTER["prtMarkerMarkTech"]
 prtMarkerCounterUnit = PRINTER["prtMarkerCounterUnit"]
 prtMarkerSuppliesType = PRINTER["prtMarkerSuppliesType"]
-prtMarkerSuppliesLevel = PRINTER["prtMarkerSuppliesLevel"]
 prtMarkerSuppliesDescription = PRINTER["prtMarkerSuppliesDescription"]
+prtMarkerSuppliesMaxCapacity = PRINTER["prtMarkerSuppliesMaxCapacity"]
+prtMarkerSuppliesLevel = PRINTER["prtMarkerSuppliesLevel"]
 hrPrinterStatus = PRINTER["hrPrinterStatus"]
-hrDeviceSerialNumber = PRINTER["hrDeviceSerialNumber"]
 
 __all__ = [
     "PRINTER",
-    "hrDeviceSerialNumber",
     "hrPrinterStatus",
     "printmib",
+    "prtConsoleDisplayBufferText",
     "prtCoverTable",
     "prtGeneralPrinterName",
+    "prtGeneralSerialNumber",
     "prtGeneralTable",
     "prtInputCurrentLevel",
     "prtInputDesc",
@@ -126,6 +141,7 @@ __all__ = [
     "prtMarkerMarkTech",
     "prtMarkerSuppliesDescription",
     "prtMarkerSuppliesLevel",
+    "prtMarkerSuppliesMaxCapacity",
     "prtMarkerSuppliesTable",
     "prtMarkerSuppliesType",
     "prtMarkerTable",
