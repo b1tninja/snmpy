@@ -11,8 +11,9 @@ Requires Python ≥ 3.12.
 For development (this repo):
 
 ```bash
-pip install -e .            # library
-pip install -e ".[dev]"     # + ruff, mypy, pytest
+pip install -e .               # library
+pip install -e ".[dev]"        # + ruff, mypy, pytest
+pip install -e ".[dev,crypto]" # + cryptography, needed by the AES/DES tests
 ```
 
 To consume it as a dependency, install from a tagged release — the name
@@ -108,9 +109,12 @@ Examples in `examples/` (`trap_demo.py`, `bulk_demo.py`, `server.py`).
 
 ```bash
 python -m pytest            # 154 tests + 102 subtests, incl. loopback UDP integration
-python -m ruff check .      # ~875 findings today — see CI's advisory report
-python -m mypy              # ~379 errors today (targets come from pyproject)
+python -m ruff check .      # ~841 findings today — see CI's advisory report
+python -m mypy              # ~366 errors today (targets come from pyproject)
 ```
+
+The AES/DES cases need the `crypto` extra and skip instead of failing
+without it, so CI installs `.[dev,crypto]` and runs the matrix unskipped.
 
 Both static tools are wired into CI as a **non-blocking** `quality` job that
 publishes the current counts to the run summary; the test matrix and the
