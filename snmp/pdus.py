@@ -285,18 +285,24 @@ class Request(PDU):
     """Base SNMP Request PDU."""
 
     @classmethod
-    def from_oid(cls: Type[T], oid: Optional[str] = None) -> T:
-        """Create a Request PDU from an OID string.
+    def from_oid(cls: Type[T], oid: Optional[object] = None) -> T:
+        """Create a Request PDU from an OID string, ``ObjectIdentifier``, or ``Oid``.
 
         Args:
-            oid: Object Identifier string. Defaults to snmp.mib.system.
+            oid: Object Identifier. Defaults to snmp.mib.system.
 
         Returns:
             Request instance.
         """
+        from snmp.oid import Oid, resolve_oid
+
         if oid is None:
             oid = snmp.mib.system
-        if isinstance(oid, str):
+        if isinstance(oid, Oid) or (
+            isinstance(oid, str) and (":" in oid and not oid[0].isdigit())
+        ):
+            oid = ObjectIdentifier.from_string(resolve_oid(oid))  # type: ignore[arg-type]
+        elif isinstance(oid, str):
             oid = ObjectIdentifier.from_string(oid)
         if isinstance(oid, ObjectIdentifier):
             oid = oid.get_object()

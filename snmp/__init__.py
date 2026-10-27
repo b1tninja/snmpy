@@ -1,113 +1,27 @@
-"""SNMP module for SNMP protocol operations.
+"""SNMP protocol package: BER datagrams, PDUs, clients and servers.
 
-Implements RFC 1157: A Simple Network Management Protocol (SNMP).
-
-Exports PDU types:
-    - GetRequest: Retrieve managed object value (§4.1.2)
-    - GetNextRequest: Retrieve next managed object value (§4.1.3)
-    - GetResponse: Response to GetRequest/GetNextRequest (§4.1.4)
-    - SetRequest: Set managed object value (§4.1.5)
-    - Trap: Asynchronous trap message (§4.1.6)
-
-Exports server/client ABCs:
-    - SNMPServer: Abstract base class for SNMP servers
-    - SNMPClient: Abstract base class for SNMP clients
+Protocol baselines: RFC 1157 (v1), RFC 3416 (v2c protocol operations),
+RFC 3417 (UDP transport mapping).  Keep the public surface small and
+explicit — import submodules directly for everything else (e.g.
+``from snmp.client import SNMPClientImpl``).
 """
 
 from __future__ import annotations
 
-from snmp.datagram import SNMPDatagram
-from snmp.pdus import GetRequest, GetNextRequest, GetResponse, SetRequest, Trap
-from snmp.enums import ErrorStatus, SNMPVersion
-from snmp.security import (
-    AuthenticationError,
-    CommunityDatabase,
-    CommunityPolicy,
-    CommunityProfile,
-    MIBViewFilter,
-    MIBViewTree,
-    MessageSizeLimit,
-    ProfileDatabase,
-    ProxyAgent,
-    ProxyAgentRegistry,
-    AuthenticationService,
-    get_authentication_service,
-    generate_authentication_failure_trap,
-)
-from snmp.mib_view import (
-    MIBView,
-    UCDView,
-    IFTableView,
-    HostResourcesView,
-    InterfaceInfo,
-    SystemMetrics,
-    BatteryInfo,
-)
-from snmp.server import SNMPServer
-from snmp.client import SNMPClient
-from snmp.types import VarBind, VarBinds, WalkResult, SNMPValue, SocketAddress, ErrorStatusInt
-from snmp.factories import (
-    make_var_bind,
-    make_var_binds,
-    make_get_request,
-    make_set_value,
-    make_empty_var_binds,
-    _to_snmp_value,
-)
-
+# UDP port assignments (RFC 3417 §3.1): agents 161, SNMP middlemen/trap
+# receiver 162.  Defined before submodule imports so partially
+# initialized state never breaks ``from snmp import DEFAULT_PORT``.
 DEFAULT_PORT = 161
+TRAP_PORT = 162
+
+from snmp.enums import ErrorStatus, SNMPVersion  # noqa: E402
+from snmp.session import Session  # noqa: E402
 
 __all__ = [
-    # Constants
     "DEFAULT_PORT",
-    # Datagram
-    "SNMPDatagram",
-    # PDU Types
-    "GetRequest",
-    "GetNextRequest",
-    "GetResponse",
-    "SetRequest",
-    "Trap",
-    # Enums
+    "TRAP_PORT",
     "ErrorStatus",
     "SNMPVersion",
-    # Security (RFC 1157 §8)
-    "AuthenticationError",
-    "CommunityDatabase",
-    "CommunityPolicy",
-    "CommunityProfile",
-    "MIBViewFilter",
-    "MIBViewTree",
-    "ProfileDatabase",
-    "ProxyAgent",
-    "ProxyAgentRegistry",
-    "AuthenticationService",
-    "MessageSizeLimit",
-    "get_authentication_service",
-    "generate_authentication_failure_trap",
-    # Server/Client ABCs
-    "SNMPServer",
-    "SNMPClient",
-    # MIB View ABC & Implementations
-    "MIBView",
-    "UCDView",
-    "IFTableView",
-    "HostResourcesView",
-    "InterfaceInfo",
-    "SystemMetrics",
-    "BatteryInfo",
-    # Type aliases (snmp.types)
-    "VarBind",
-    "VarBinds",
-    "WalkResult",
-    "SNMPValue",
-    "SocketAddress",
-    "ErrorStatusInt",
-    # Factory functions (snmp.factories)
-    "make_var_bind",
-    "make_var_binds",
-    "make_get_request",
-    "make_set_value",
-    "make_empty_var_binds",
-    "_to_snmp_value",
+    "Session",
 ]
+

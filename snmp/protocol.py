@@ -258,7 +258,7 @@ class SNMPProtocol(asyncio.DatagramProtocol):
                 )
                 return
             else:
-                key = (host, datagram.pdu.request_id.value)  # type: ignore[union-attr]
+                key = (host, int(datagram.pdu.request_id))  # type: ignore[union-attr]
                 if key in self.requests:
                     try:
                         self.requests[key].set_result(datagram)
@@ -307,7 +307,7 @@ class SNMPProtocol(asyncio.DatagramProtocol):
         assert isinstance(datagram, SNMPDatagram)
         encoded = bytes(datagram)
         response: asyncio.Future[SNMPDatagram] = asyncio.Future()
-        key = (host, datagram.pdu.request_id.value)  # type: ignore[union-attr]
+        key = (host, int(datagram.pdu.request_id))  # type: ignore[union-attr]
         self.requests[key] = response
         response.add_done_callback(
             lambda fn: self.requests.pop(key, None)

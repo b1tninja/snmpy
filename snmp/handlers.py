@@ -78,7 +78,7 @@ class OIDHandler(ABC):
 
     def set(self, oid: str, value: object) -> ErrorStatus:
         """Handle SetRequest. Default: read-only."""
-        return ErrorStatus.readOnly
+        return ErrorStatus.read_only
 
     def is_readable(self, community: str = "", oid: str = "") -> bool:
         """Check if community can read this OID."""
@@ -203,13 +203,13 @@ class DynamicValueHandler(OIDHandler):
     def set(self, oid: str, value: object) -> ErrorStatus:
         """Call the setter function if available."""
         if self._setter is None:
-            return ErrorStatus.readOnly
+            return ErrorStatus.read_only
         try:
             if self._setter(oid, value):
-                return ErrorStatus.noError
-            return ErrorStatus.genErr
+                return ErrorStatus.no_error
+            return ErrorStatus.generic_error
         except Exception:
-            return ErrorStatus.genErr
+            return ErrorStatus.generic_error
 
     def is_writable(self, community: str = "", oid: str = "") -> bool:
         """Check write access (requires setter and readwrite access)."""
@@ -341,7 +341,7 @@ class CounterHandler(OIDHandler):
 
     def set(self, oid: str, value: object) -> ErrorStatus:
         """Counters cannot be set directly."""
-        return ErrorStatus.readOnly
+        return ErrorStatus.read_only
 
 
 class EnumerableHandler(OIDHandler):

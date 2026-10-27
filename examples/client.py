@@ -36,12 +36,7 @@ Re-exports MIB view classes from ``snmp.mib_view``:
 
 from __future__ import annotations
 
-import asyncio
-from typing import Optional
-
-from snmp.client import SNMPClient, _SNMPClientProtocol
-from snmp.datagram import SNMPDatagram
-from snmp.enums import SNMPVersion
+from snmp.client import SNMPClientImpl
 from snmp.mib_view import (
     MIBView,
     UCDView,
@@ -134,131 +129,10 @@ def print_tcp_stats(stats: TcpStats) -> None:
 
 
 # ===========================================================================
-# SNMP Client Implementation
+# SNMP Client Implementation — re-exported from snmp.client
 # ===========================================================================
-
-class SNMPClientImpl(SNMPClient):
-    """Concrete SNMP client implementation with UDP transport.
-
-    This is the default implementation that handles socket creation,
-    datagram sending/receiving, and response parsing.
-
-    Inherits all abstract methods and concrete methods from SNMPClient.
-    """
-
-    # =========================================================================
-    # Class-level defaults (can be overridden by subclasses or __init__)
-    # =========================================================================
-
-    community: str = "public"
-    """Default community name. Overridden by __init__ or instance attribute."""
-    version: SNMPVersion = SNMPVersion.v1
-    """Default SNMP version."""
-    timeout: float = 5.0
-    """Default request timeout in seconds."""
-    retries: int = 3
-    """Default number of retries."""
-
-    def __init__(
-        self,
-        community: Optional[str] = None,
-        version: Optional[SNMPVersion] = None,
-        timeout: Optional[float] = None,
-        retries: Optional[int] = None,
-    ) -> None:
-        """Initialize the SNMP client implementation.
-
-        Any parameter can be ``None`` to fall back to the class-level default.
-        Instance attributes override class defaults when provided.
-
-        Args:
-            community: Community name for authentication.
-            version: SNMP version (v1 or v2c).
-            timeout: Request timeout in seconds.
-            retries: Number of retries on timeout/failure.
-
-        Example:
-
-        .. code-block:: python
-
-            # Use all defaults
-            client = SNMPClientImpl()
-
-            # Override specific settings
-            client = SNMPClientImpl(community="mycommunity", timeout=1.0)
-        """
-        if community is not None:
-            self.community = community
-        if version is not None:
-            self.version = version
-        if timeout is not None:
-            self.timeout = timeout
-        if retries is not None:
-            self.retries = retries
-
-    # =========================================================================
-    # Abstract method implementation
-    # =========================================================================
-
-    async def _send_receive(
-        self,
-        datagram: SNMPDatagram,
-        host: str,
-        port: int,
-    ) -> Optional[bytes]:
-        """Send datagram and receive response via UDP.
-
-        Creates a dedicated UDP endpoint per request, sends the datagram,
-        waits for a response, then discards the endpoint. This ensures
-        clean request/response pairing without state leakage.
-
-        Args:
-            datagram: The SNMP datagram to send.
-            host: Target host address.
-            port: Target UDP port.
-
-        Returns:
-            Raw response bytes, or None on failure.
-        """
-        # Create a response capture protocol
-        protocol = _SNMPClientProtocol()
-
-        try:
-            loop = asyncio.get_event_loop()
-
-            transport, _ = await loop.create_datagram_endpoint(
-                lambda: protocol,
-                local_addr=("127.0.0.1", 0),  # Bind ephemeral port
-            )
-
-            try:
-                # Send the datagram
-                transport.sendto(bytes(datagram), (host, port))
-
-                # Wait for response with timeout
-                response = await asyncio.wait_for(
-                    protocol.response_event.wait(),
-                    timeout=self.timeout,
-                )
-
-                if response and protocol.response_data:
-                    return protocol.response_data[0]
-                return None
-            finally:
-                transport.close()
-        except asyncio.TimeoutError:
-            return None
-        except Exception:
-            return None
-
-    async def close(self) -> None:
-        """Close any underlying UDP transport.
-
-        This is a no-op for the default implementation since each request
-        creates a fresh ephemeral UDP endpoint that closes immediately after.
-        Custom subclasses with persistent transports should override.
-        """
-        pass
+# SNMPClientImpl lives in snmp.client (binds 0.0.0.0, default v2c). Kept here
+# so `from examples.client import SNMPClientImpl` continues to work.
 
 
 __all__ = [

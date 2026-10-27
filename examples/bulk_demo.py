@@ -113,7 +113,7 @@ class SNMPBulkClient(SNMPClient):
 
             transport, _ = await loop.create_datagram_endpoint(
                 lambda: protocol,
-                local_addr=("127.0.0.1", 0),
+                local_addr=("0.0.0.0", 0),  # not 127.0.0.1 — remote replies need any-iface
             )
 
             try:

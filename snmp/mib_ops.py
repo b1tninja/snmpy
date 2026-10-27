@@ -101,12 +101,12 @@ def error_status_for_exception(exc: Exception) -> ErrorStatus:
         The corresponding SNMP error status.
     """
     if isinstance(exc, ValueError):
-        return ErrorStatus.badValue
+        return ErrorStatus.bad_value
     if isinstance(exc, KeyError):
-        return ErrorStatus.noSuchName
+        return ErrorStatus.no_such_name
     if isinstance(exc, PermissionError):
-        return ErrorStatus.readOnly
-    return ErrorStatus.genErr
+        return ErrorStatus.read_only
+    return ErrorStatus.generic_error
 
 
 def validate_oid_format(oid: str) -> bool:
@@ -377,22 +377,22 @@ def set_value(
         ErrorStatus indicating success or failure.
     """
     if not validate_oid_format(oid):
-        return ErrorStatus.noSuchName
+        return ErrorStatus.no_such_name
 
     # Check if the OID is settable
     if registry:
         info = registry.get_info(oid)
         if info and info.get("access") == "read":
-            return ErrorStatus.readOnly
+            return ErrorStatus.read_only
 
     if set_func is None:
-        return ErrorStatus.noSuchName
+        return ErrorStatus.no_such_name
 
     try:
         success = set_func(oid, value)
         if success:
-            return ErrorStatus.noError
-        return ErrorStatus.genErr
+            return ErrorStatus.no_error
+        return ErrorStatus.generic_error
     except Exception as e:
         return error_status_for_exception(e)
 
@@ -498,7 +498,7 @@ def set_multiple(
     for oid, value in values.items():
         status = set_value(oid, value, registry, set_func)
         results.append((oid, status))
-        if status != ErrorStatus.noError:
+        if status != ErrorStatus.no_error:
             all_ok = False
 
     return results

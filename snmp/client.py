@@ -28,7 +28,7 @@ from snmp.exceptions import SNMPTimeoutError, SNMPProtocolError, BERDecodeError
 # Type aliases imported from snmp.types for documentation only
 # VarBind, WalkResult, SNMPValue are defined in snmp/types.py
 from ber.object import Integer, Object, ObjectIdentifier, OctetString, Null
-from snmp.factories import make_var_bind, make_var_binds, _to_snmp_value as _to_snmp_value_factory
+from snmp.factories import make_var_binds, _to_snmp_value as _to_snmp_value_factory
 
 # ---------------------------------------------------------------------------
 # Network error handling
@@ -76,8 +76,9 @@ class SNMPClient(ABC):
     community: str = "public"
     """Community name for SNMP authentication."""
 
-    version: SNMPVersion = SNMPVersion.v1
-    """SNMP protocol version (v1 or v2c)."""
+    version: SNMPVersion = SNMPVersion.v2c
+    """SNMP protocol version (v1 or v2c). Default v2c — many agents ignore or
+    mishandle v1 for enterprise OIDs; Session and live devices prefer v2c."""
 
     timeout: float = 5.0
     """Request timeout in seconds."""
@@ -303,10 +304,11 @@ class SNMPClient(ABC):
         """
         for attempt in range(self.retries):
             try:
-                # Build the variable binding using factory helper
-                var_bind = make_var_bind(oid, value)
+                # Build the variable-bindings SEQUENCE using factory helper
+                # (must be SEQUENCE OF var-bind, not a bare var-bind).
+                var_binds = make_var_binds([(oid, value)])
 
-                pdu = SetRequest(variable_bindings=var_bind)
+                pdu = SetRequest(variable_bindings=var_binds)
 
                 response_bytes = await self._send_receive(
                     self._build_datagram(pdu), host, port
@@ -485,17 +487,25 @@ class _SNMPClientProtocol(asyncio.DatagramProtocol):
     """Custom DatagramProtocol that captures received UDP data.
 
     This protocol is used by SNMPClientImpl to receive SNMP responses.
-    It sets an event when data arrives so that ``_send_receive`` can wait.
+    It sets an event only when a datagram arrives so that ``_send_receive``
+    can wait. ICMP / socket errors must *not* complete the wait with empty
+    data — that previously made remote GETs look like silent drops when the
+    socket was mis-bound to loopback.
     """
 
     def __init__(self) -> None:
         """Initialize the protocol."""
         self.response_data: list[bytes] = []
         self.response_event = asyncio.Event()
+        self.error: Optional[Exception] = None
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
-        """Called when the connection is lost."""
-        self.response_event.set()
+        """Called when the connection is lost.
+
+        Do not wake waiters without payload; let the request timeout expire.
+        """
+        if exc is not None:
+            self.error = exc
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         """Called when a datagram is received.
@@ -508,5 +518,103 @@ class _SNMPClientProtocol(asyncio.DatagramProtocol):
         self.response_event.set()
 
     def error_received(self, exc: Exception) -> None:
-        """Called when an error occurs during receive."""
-        self.response_event.set()
+        """Called when a socket error occurs (e.g. ICMP unreachable).
+
+        Record the error but do not set ``response_event``: on Windows a
+        loopback-bound socket sending to a remote host often gets an immediate
+        ``error_received`` with no datagram, which previously returned None
+        before the agent reply could arrive (or looked like a drop).
+        """
+        self.error = exc
+
+
+class SNMPClientImpl(SNMPClient):
+    """Concrete SNMP client with asyncio UDP transport.
+
+    Binds an ephemeral port on ``0.0.0.0`` so replies from remote agents
+    (LAN printers, etc.) are receivable. Binding to ``127.0.0.1`` drops
+    those responses.
+
+    Default version is SNMPv2c to match ``snmp.session.Session`` and typical
+    device expectations.
+    """
+
+    community: str = "public"
+    version: SNMPVersion = SNMPVersion.v2c
+    timeout: float = 5.0
+    retries: int = 3
+
+    def __init__(
+        self,
+        community: Optional[str] = None,
+        version: Optional[SNMPVersion] = None,
+        timeout: Optional[float] = None,
+        retries: Optional[int] = None,
+    ) -> None:
+        """Initialize the client.
+
+        Args:
+            community: Community name (default ``public``).
+            version: SNMP version (default ``v2c``).
+            timeout: Per-attempt timeout in seconds.
+            retries: Attempts on timeout/failure.
+        """
+        if community is not None:
+            self.community = community
+        if version is not None:
+            self.version = version
+        if timeout is not None:
+            self.timeout = timeout
+        if retries is not None:
+            self.retries = retries
+
+    async def _send_receive(
+        self,
+        datagram: SNMPDatagram,
+        host: str,
+        port: int,
+    ) -> Optional[bytes]:
+        """Send datagram and receive response via UDP.
+
+        Creates a dedicated UDP endpoint per request on ``0.0.0.0`` (any
+        local interface), sends the datagram, waits for a response, then
+        closes the endpoint.
+
+        Args:
+            datagram: The SNMP datagram to send.
+            host: Target host address.
+            port: Target UDP port.
+
+        Returns:
+            Raw response bytes, or None on failure.
+        """
+        protocol = _SNMPClientProtocol()
+
+        try:
+            loop = asyncio.get_running_loop()
+
+            # Must not bind 127.0.0.1 — remote agent replies never reach loopback.
+            transport, _ = await loop.create_datagram_endpoint(
+                lambda: protocol,
+                local_addr=("0.0.0.0", 0),
+            )
+
+            try:
+                transport.sendto(bytes(datagram), (host, port))
+                await asyncio.wait_for(
+                    protocol.response_event.wait(),
+                    timeout=self.timeout,
+                )
+                if protocol.response_data:
+                    return protocol.response_data[0]
+                return None
+            finally:
+                transport.close()
+        except asyncio.TimeoutError:
+            return None
+        except OSError:
+            return None
+
+    async def close(self) -> None:
+        """Close underlying transport (no-op: per-request ephemeral sockets)."""
+        pass

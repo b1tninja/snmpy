@@ -160,9 +160,9 @@ class MIBRegistry:
         for entry in self._entries:
             if oid == entry.oid or oid.startswith(entry.oid + "."):
                 if entry.handler.is_writable(community, oid):
-                    return (entry.handler, ErrorStatus.noError)
+                    return (entry.handler, ErrorStatus.no_error)
                 else:
-                    return (entry.handler, ErrorStatus.readOnly)
+                    return (entry.handler, ErrorStatus.read_only)
         return None
 
     def list_handlers(self) -> list[tuple[str, OIDHandler]]:

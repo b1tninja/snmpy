@@ -641,20 +641,20 @@ class SNMPServer(ABC):
             value = value_obj
 
             if not self.validate_access(community, oid_str, "write"):
-                errors.append((oid_str, ErrorStatus.readOnly))
+                errors.append((oid_str, ErrorStatus.read_only))
                 continue
 
             if self.set_mib(oid_str, value):
-                errors.append((oid_str, ErrorStatus.noError))
+                errors.append((oid_str, ErrorStatus.no_error))
             else:
-                errors.append((oid_str, ErrorStatus.noSuchName))
+                errors.append((oid_str, ErrorStatus.no_such_name))
 
             response_vars.append((oid_str, value))
 
-        error_status = ErrorStatus.noError
+        error_status = ErrorStatus.no_error
         error_index = 0
         for i, (oid, err) in enumerate(errors):
-            if err != ErrorStatus.noError:
+            if err != ErrorStatus.no_error:
                 error_status = err
                 error_index = i + 1
                 break
@@ -1190,10 +1190,10 @@ class MockSNMPServer(SNMPServer):
         if set_result is None:
             return False
         handler, error_status = set_result
-        if error_status != ErrorStatus.noError:
+        if error_status != ErrorStatus.no_error:
             return False
         status = handler.set(oid, value)
-        return status == ErrorStatus.noError
+        return status == ErrorStatus.no_error
 
     def get_mib_keys(self) -> list[str]:
         """Get all OIDs in the MIB via MIBRegistry + table handler + direct storage."""

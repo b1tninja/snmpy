@@ -114,6 +114,7 @@ class _SNMPClientProtocol(asyncio.DatagramProtocol):
 
     response_data: list[bytes]
     response_event: asyncio.Event
+    error: Optional[Exception]
 
     def __init__(self) -> None:
         ...
@@ -126,3 +127,27 @@ class _SNMPClientProtocol(asyncio.DatagramProtocol):
 
     def error_received(self, exc: Exception) -> None:
         ...
+
+class SNMPClientImpl(SNMPClient):
+    """Concrete asyncio UDP SNMP client (binds 0.0.0.0, default v2c)."""
+
+    def __init__(
+        self,
+        community: Optional[str] = None,
+        version: Optional[SNMPVersion] = None,
+        timeout: Optional[float] = None,
+        retries: Optional[int] = None,
+    ) -> None:
+        ...
+
+    async def _send_receive(
+        self,
+        datagram: SNMPDatagram,
+        host: str,
+        port: int,
+    ) -> Optional[bytes]:
+        ...
+
+    async def close(self) -> None:
+        ...
+

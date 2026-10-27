@@ -2,34 +2,36 @@
 
 Provides:
 - SecurityLevel: noAuthNoPriv, authNoPriv, authPriv
-- AuthProtocol: None, MD5, SHA, SHA96
+- AuthProtocol: None, MD5, SHA/SHA96, SHA224, SHA256, SHA384, SHA512
 - PrivProtocol: None, DES, AES128, AES192, AES256
 - USMUser: User security credentials (username, auth, privacy)
 - USMUserDatabase: User database for authentication
-- SecurityParameters: USM security parameters (RFC 3414 §5)
+- SecurityParameters: USM msgSecurityParameters (RFC 3414 §2.4, A.4)
+- password_to_key / localize_key / localize_passphrase (RFC 3414 §2.6, A.2)
 
-RFC 3414 (User-based Security Model (USM) for Protocol
-Processing Model (SPM) for SNMPv3):
+RFC 3414 (User-based Security Model (USM) for SNMPv3):
     Defines the security model for SNMPv3 with:
-    - Authentication: MD5, SHA, HMAC/SHA-256
-    - Privacy: DES Encryption (CBC), AES (CBC/AES128/AES192/AES256)
+    - Authentication: HMAC-MD5-96 and HMAC-SHA-96 (RFC 3414 §6/§7) plus
+      the HMAC-SHA-2 family (RFC 7860 §4)
+    - Privacy: DES-CBC (RFC 3414 §8) and AES-128-CFB128 (RFC 3826);
+      AES-192/AES-256 CFB variants per draft-reeder-snmpv3-usm-3desede-aes
     - Security levels: noAuthNoPriv, authNoPriv, authPriv
 """
 
 from __future__ import annotations
 
-import os
+from collections.abc import Callable
 from enum import Enum
-from hashlib import md5, sha1, sha256
-from typing import ClassVar, Optional
+from hashlib import md5, sha1, sha224, sha256, sha384, sha512
 
+from ber.object import Integer, Object, OctetString, Sequence
 
 # =============================================================================
 # Security Levels
 # =============================================================================
 
 class SecurityLevel(Enum):
-    """SNMPv3 security levels per RFC 3414 §5.1.
+    """SNMPv3 security levels per RFC 3414 §5 (SnmpSecurityLevel).
 
     Attributes:
         NO_AUTH_NO_PRIV: No authentication or privacy (level 0).
@@ -58,60 +60,136 @@ class SecurityLevel(Enum):
 # Authentication Protocols
 # =============================================================================
 
+# Length of the truncated MAC carried in msgAuthenticationParameters.
+# RFC 3414 §6.3.1/§7.3.1 truncate to 12 octets; RFC 7860 §4 truncates
+# the SHA-2 based MACs to 16/24/32/48 octets (not to the full digest).
+# Module scope on purpose: a single-underscore name inside an Enum body
+# becomes an enum member instead of a class attribute.
+_AUTH_MAC_LENGTHS: dict[str, int] = {
+    "none": 0,
+    "MD5": 12,
+    "SHA": 12,
+    "SHA96": 12,
+    "SHA224": 16,
+    "SHA256": 24,
+    "SHA384": 32,
+    "SHA512": 48,
+}
+
+# Localized key length == the digest size of the hash used for both
+# password_to_key and the HMAC (RFC 3414 §2.6, RFC 7860 §4.1).
+_AUTH_KEY_LENGTHS: dict[str, int] = {
+    "none": 0,
+    "MD5": 16,
+    "SHA": 20,
+    "SHA96": 20,
+    "SHA224": 28,
+    "SHA256": 32,
+    "SHA384": 48,
+    "SHA512": 64,
+}
+
+# Hash algorithm used for key localization and for the HMAC.
+_AUTH_HASH_NAMES: dict[str, str] = {
+    "MD5": "md5",
+    "SHA": "sha1",
+    "SHA96": "sha1",
+    "SHA224": "sha224",
+    "SHA256": "sha256",
+    "SHA384": "sha384",
+    "SHA512": "sha512",
+}
+
+
 class AuthProtocol(Enum):
-    """Authentication protocols per RFC 3414 §3.2.
+    """Authentication protocols per RFC 3414 §6/§7 and RFC 7860 §4.
 
     Attributes:
-        NONE: No authentication protocol (RFC 3414 §3.2).
-        MD5: MD5 authentication protocol (RFC 3414 §3.2.1).
-        SHA: SHA-1 authentication protocol (RFC 3414 §3.2.2).
-        SHA96: SHA-96 authentication protocol (RFC 3414 §3.2.2).
-        SHA256: SHA-256 authentication protocol (RFC 7860).
-        SHA384: SHA-384 authentication protocol (RFC 7860).
-        SHA512: SHA-512 authentication protocol (RFC 7860).
+        NONE: No authentication protocol.
+        MD5: HMAC-MD5-96 authentication protocol (RFC 3414 §6).
+        SHA: HMAC-SHA-96 authentication protocol (RFC 3414 §7).
+        SHA96: Synonym of SHA (both are the 96-bit truncated SHA-1 MAC).
+        SHA224: HMAC-SHA-224 authentication protocol (RFC 7860 §4).
+        SHA256: HMAC-SHA-256 authentication protocol (RFC 7860 §4).
+        SHA384: HMAC-SHA-384 authentication protocol (RFC 7860 §4).
+        SHA512: HMAC-SHA-512 authentication protocol (RFC 7860 §4).
     """
 
     NONE: str = "none"
     MD5: str = "MD5"
     SHA: str = "SHA"
     SHA96: str = "SHA96"
+    SHA224: str = "SHA224"
     SHA256: str = "SHA256"
     SHA384: str = "SHA384"
     SHA512: str = "SHA512"
 
-    _AUTH_DIGEST_LENGTHS: ClassVar[dict[str, int]] = {
-        "none": 0,
-        "MD5": 16,
-        "SHA": 20,
-        "SHA96": 12,
-        "SHA256": 32,
-        "SHA384": 48,
-        "SHA512": 64,
-    }
-
-    def get_digest_length(self) -> int:
-        """Get the authentication digest length in bytes.
+    def get_mac_length(self) -> int:
+        """Get the on-the-wire (truncated) MAC length in octets.
 
         Returns:
-            Digest length in bytes for this protocol.
+            MAC length in octets for this protocol.
         """
-        return self._AUTH_DIGEST_LENGTHS.get(self.value, 0)
+        return _AUTH_MAC_LENGTHS.get(self.value, 0)
+
+    def get_digest_length(self) -> int:
+        """Backwards-compatible alias for :meth:`get_mac_length`."""
+        return self.get_mac_length()
+
+    def get_key_length(self) -> int:
+        """Get the localized key length in octets.
+
+        Returns:
+            Key length in octets (the hash digest size) for this protocol.
+        """
+        return _AUTH_KEY_LENGTHS.get(self.value, 0)
+
+    @property
+    def hash_name(self) -> str:
+        """Name of the hash algorithm used by this protocol (empty for NONE)."""
+        return _AUTH_HASH_NAMES.get(self.value, "")
 
 
 # =============================================================================
 # Privacy Protocols
 # =============================================================================
 
+# Length of the localized privacy key.  For DES this is 16 octets even
+# though only 8 are used as the DES key: the first 8 form the (odd
+# parity adjusted) key and the last 8 the pre-IV (RFC 3414 §8.1.1.1).
+# For AES the localized key is used as the cipher key (RFC 3826 §3.1.2.1).
+# Module scope on purpose: a single-underscore name inside an Enum body
+# becomes an enum member instead of a class attribute.
+_PRIV_KEY_LENGTHS: dict[str, int] = {
+    "none": 0,
+    "DES": 16,
+    "AES": 16,
+    "AES128": 16,
+    "AES192": 24,
+    "AES256": 32,
+}
+
+# Length of msgPrivacyParameters: the 8-octet IV for DES
+# (RFC 3414 §8.2.3) and the 8-octet salt for AES (RFC 3826 §3.2.3).
+_PRIV_PARAM_LENGTHS: dict[str, int] = {
+    "DES": 8,
+    "AES": 8,
+    "AES128": 8,
+    "AES192": 8,
+    "AES256": 8,
+}
+
+
 class PrivProtocol(Enum):
-    """Privacy protocols per RFC 3414 §3.3.
+    """Privacy protocols per RFC 3414 §8 and RFC 3826.
 
     Attributes:
         NONE: No privacy protocol (encryption disabled).
-        DES: DES encryption (RFC 3414 §3.3).
-        AES: AES encryption (RFC 3826 / RFC 3827 / RFC 3828).
-        AES128: AES-128 encryption (RFC 3826).
-        AES192: AES-192 encryption (RFC 3827).
-        AES256: AES-256 encryption (RFC 3828).
+        DES: CBC-DES encryption with a 64-bit salt-derived IV (RFC 3414 §8).
+        AES: Alias of AES128 — CFB128-AES-128 (RFC 3826).
+        AES128: CFB128-AES-128 encryption (RFC 3826).
+        AES192: CFB128-AES-192 encryption (draft-reeder-snmpv3-usm-3desede-aes).
+        AES256: CFB128-AES-256 encryption (draft-reeder-snmpv3-usm-3desede-aes).
     """
 
     NONE: str = "none"
@@ -121,21 +199,17 @@ class PrivProtocol(Enum):
     AES192: str = "AES192"
     AES256: str = "AES256"
 
-    _PRIV_KEY_LENGTHS: ClassVar[dict[str, int]] = {
-        "none": 0,
-        "DES": 8,
-        "AES128": 16,
-        "AES192": 24,
-        "AES256": 32,
-    }
-
     def get_key_length(self) -> int:
         """Get the privacy key length in bytes.
 
         Returns:
             Key length in bytes for this protocol.
         """
-        return self._PRIV_KEY_LENGTHS.get(self.value, 0)
+        return _PRIV_KEY_LENGTHS.get(self.value, 0)
+
+    def get_priv_param_length(self) -> int:
+        """Get the msgPrivacyParameters length in octets (0 if unsupported)."""
+        return _PRIV_PARAM_LENGTHS.get(self.value, 0)
 
 
 # =============================================================================
@@ -161,10 +235,10 @@ class USMUser:
         self,
         username: str,
         auth_protocol: AuthProtocol = AuthProtocol.NONE,
-        auth_passphrase: Optional[str] = None,
+        auth_passphrase: str | None = None,
         priv_protocol: PrivProtocol = PrivProtocol.NONE,
-        priv_passphrase: Optional[str] = None,
-        security_engine_id: Optional[bytes] = None,
+        priv_passphrase: str | None = None,
+        security_engine_id: bytes | None = None,
     ) -> None:
         """Initialize USM user credentials.
 
@@ -283,7 +357,7 @@ class USMUserDatabase:
             return True
         return False
 
-    def get_user(self, username: str) -> Optional[USMUser]:
+    def get_user(self, username: str) -> USMUser | None:
         """Get user credentials by username.
 
         Args:
@@ -323,13 +397,20 @@ class USMUserDatabase:
 # =============================================================================
 
 class SecurityParameters:
-    """USM security parameters per RFC 3414 §5.
+    """USM security parameters per RFC 3414 §2.4 (msgSecurityParameters).
 
-    Contains all the security parameters used in USM processing:
-    - engine_id: The ID of the sending/receiving engine.
-    - username: The name of the security principal.
-    - security_level: The requested security level.
-    - security_model: The security model ID (USM = 3).
+    Wire fields (RFC 3414 §2.4, sample encoding in §A.4):
+    - engine_id: msgAuthoritativeEngineID.
+    - engine_boots: msgAuthoritativeEngineBoots.
+    - engine_time: msgAuthoritativeEngineTime.
+    - username: msgUserName.
+    - mac: msgAuthenticationParameters (the truncated MAC / MIC).
+    - priv_parameters: msgPrivacyParameters (DES IV or AES salt).
+
+    Local-only helpers (never carried on the wire):
+    - security_level / security_model: dispatch information.
+    - authentication_key / privacy_key / auth_protocol / priv_protocol:
+      the user's localized keys and protocol selection.
     """
 
     USM_SECURITY_MODEL: int = 3
@@ -343,17 +424,25 @@ class SecurityParameters:
         privacy_key: bytes = b"",
         auth_protocol: str = "",
         priv_protocol: str = "",
+        engine_boots: int = 0,
+        engine_time: int = 0,
+        priv_parameters: bytes = b"",
+        mac: bytes = b"",
     ) -> None:
         """Initialize USM security parameters.
 
         Args:
-            engine_id: The engine ID.
+            engine_id: The (authoritative) engine ID.
             username: The security principal.
             security_level: The security level (0=noAuthNoPriv, 1=authNoPriv, 2=authPriv).
-            authentication_key: Pre-matured authentication key for MIC calculation.
-            privacy_key: Pre-matured privacy key for encryption.
+            authentication_key: Localized authentication key for MIC calculation.
+            privacy_key: Localized privacy key for encryption.
             auth_protocol: Authentication protocol (CBC-SHA-96, HMAC-SHA-256, etc.).
             priv_protocol: Privacy protocol (DES, AES128, AES192, AES256).
+            engine_boots: msgAuthoritativeEngineBoots (RFC 3414 §2.4).
+            engine_time: msgAuthoritativeEngineTime (RFC 3414 §2.4).
+            priv_parameters: msgPrivacyParameters (DES IV / AES salt).
+            mac: msgAuthenticationParameters (the MIC as carried on the wire).
         """
         self.engine_id: bytes = engine_id
         self.username: str = username
@@ -363,6 +452,10 @@ class SecurityParameters:
         self.privacy_key: bytes = privacy_key
         self.auth_protocol: str = auth_protocol
         self.priv_protocol: str = priv_protocol
+        self.engine_boots: int = engine_boots
+        self.engine_time: int = engine_time
+        self.priv_parameters: bytes = priv_parameters
+        self.mac: bytes = mac
 
     @property
     def security_level_name(self) -> str:
@@ -374,61 +467,212 @@ class SecurityParameters:
         levels: dict[int, str] = {0: "noAuthNoPriv", 1: "authNoPriv", 2: "authPriv"}
         return levels.get(self.security_level, "unknown")
 
+    def encode(self) -> bytes:
+        """Serialize as the USM msgSecurityParameters SEQUENCE.
+
+        RFC 3414 §2.4 / §A.4::
+
+            msgSecurityParameters ::= SEQUENCE {
+                msgAuthoritativeEngineID    OCTET STRING,
+                msgAuthoritativeEngineBoots INTEGER,
+                msgAuthoritativeEngineTime  INTEGER,
+                msgUserName                 OCTET STRING,
+                msgAuthenticationParameters OCTET STRING,
+                msgPrivacyParameters        OCTET STRING
+            }
+
+        Returns:
+            BER-encoded SEQUENCE (placed in the message as an OCTET STRING).
+        """
+        return bytes(
+            Sequence.from_list(
+                [
+                    OctetString(self.engine_id).get_object(),
+                    Integer.from_int(self.engine_boots).get_object(),
+                    Integer.from_int(self.engine_time).get_object(),
+                    OctetString(self.username.encode("utf-8")).get_object(),
+                    OctetString(self.mac).get_object(),
+                    OctetString(self.priv_parameters).get_object(),
+                ]
+            )
+        )
+
+    @classmethod
+    def decode(cls, data: bytes) -> SecurityParameters:
+        """Decode a msgSecurityParameters SEQUENCE (RFC 3414 §2.4).
+
+        Args:
+            data: BER-encoded SEQUENCE from the msgSecurityParameters
+                OCTET STRING.
+
+        Returns:
+            The decoded SecurityParameters; an empty instance if the
+            SEQUENCE does not carry the six USM fields.
+        """
+        params = cls()
+        if not data:
+            return params
+        obj, _ = Object.decode(data, 0)
+        fields = obj.value if isinstance(obj.value, list) else []
+        if len(fields) < 6:
+            return params
+        params.engine_id = bytes(fields[0].value)
+        params.engine_boots = int(fields[1])
+        params.engine_time = int(fields[2])
+        params.username = bytes(fields[3].value).decode("utf-8", "replace")
+        params.mac = bytes(fields[4].value)
+        params.priv_parameters = bytes(fields[5].value)
+        return params
+
     def __repr__(self) -> str:
         return (
             f"SecurityParameters("
             f"engine_id={self.engine_id.hex()[:24]}... "
             f"name={self.username!r} "
-            f"level={self.security_level_name})"
+            f"level={self.security_level_name} "
+            f"boots={self.engine_boots} time={self.engine_time})"
         )
 
 
 # =============================================================================
-# Key Maturation
+# Key Maturation (RFC 3414 §2.6, §A.2)
 # =============================================================================
+
+#: Hash constructors usable for key localization and MAC calculation.
+_HASHES: dict[str, Callable[..., object]] = {
+    "md5": md5,
+    "sha1": sha1,
+    "sha224": sha224,
+    "sha256": sha256,
+    "sha384": sha384,
+    "sha512": sha512,
+}
+
+#: Length of the repeated-password string fed to the hash (RFC 3414 §2.6, §A.2).
+_PASSWORD_LENGTH: int = 1_048_576
+
+#: Maximum password length considered by password_to_key (RFC 3414 §A.2).
+_MAX_PASSWORD_LENGTH: int = 255
+
+#: snmpEngineID bounds per RFC 3411 §5 (SnmpEngineID SIZE(5..32)).
+_MIN_ENGINE_ID_LENGTH: int = 5
+_MAX_ENGINE_ID_LENGTH: int = 32
+
+
+def _get_hash(hash_name: str) -> Callable[..., object]:
+    """Return the hashlib constructor for a hash name.
+
+    Args:
+        hash_name: Hash name such as "md5" or "sha256".
+
+    Returns:
+        A hashlib hash constructor.
+
+    Raises:
+        ValueError: If the hash name is not supported.
+    """
+    try:
+        return _HASHES[hash_name]
+    except KeyError:
+        raise ValueError(f"Unsupported hash algorithm: {hash_name!r}") from None
+
+
+def password_to_key(passphrase: bytes, hash_name: str = "md5") -> bytes:
+    """Convert a passphrase into a non-localized key (RFC 3414 §2.6, §A.2).
+
+    The passphrase is repeated to a 1,048,576-octet string which is hashed;
+    the resulting digest ("digest1" / Ku) is the intermediate key.
+
+    Args:
+        passphrase: The user's passphrase (truncated to 255 octets).
+        hash_name: Hash algorithm to use ("md5", "sha1", "sha224", ...).
+
+    Returns:
+        The intermediate key Ku (digest size of the hash).
+
+    Raises:
+        ValueError: If the passphrase is empty or the hash is unsupported.
+    """
+    if not passphrase:
+        raise ValueError("Passphrase must not be empty")
+    hash_fn = _get_hash(hash_name)
+    password = passphrase[:_MAX_PASSWORD_LENGTH]
+    repeats = -(-_PASSWORD_LENGTH // len(password))  # ceil division
+    extended = (password * repeats)[:_PASSWORD_LENGTH]
+    return hash_fn(extended).digest()
+
+
+def localize_key(
+    key: bytes,
+    engine_id: bytes,
+    hash_name: str = "md5",
+    key_length: int | None = None,
+) -> bytes:
+    """Localize a key to a specific snmpEngineID (RFC 3414 §2.6).
+
+    ``Kh = H(Ku || snmpEngineID || Ku)``; the localized key is the first
+    ``key_length`` octets of ``Kh``.
+
+    Args:
+        key: Non-localized key (output of :func:`password_to_key`).
+        engine_id: The authoritative SNMP engine's snmpEngineID.
+        hash_name: Hash algorithm to use.
+        key_length: Desired localized key length; defaults to the digest size.
+
+    Returns:
+        The localized key.
+
+    Raises:
+        ValueError: If the engine ID length is outside 5-32 octets.
+    """
+    if not _MIN_ENGINE_ID_LENGTH <= len(engine_id) <= _MAX_ENGINE_ID_LENGTH:
+        raise ValueError(
+            f"Engine ID must be {_MIN_ENGINE_ID_LENGTH}-{_MAX_ENGINE_ID_LENGTH} octets, "
+            f"got {len(engine_id)}"
+        )
+    hash_fn = _get_hash(hash_name)
+    digest = hash_fn(key + engine_id + key).digest()
+    return digest if key_length is None else digest[:key_length]
 
 
 def localize_passphrase(
-    passphrase: str,
+    passphrase: str | bytes,
     engine_id: bytes,
     auth_protocol: AuthProtocol = AuthProtocol.MD5,
+    key_length: int | None = None,
 ) -> bytes:
-    """Localize a passphrase with the engine ID.
+    """Localize a passphrase to a specific SNMP engine.
 
-    RFC 3414 §5.2.2: The localization procedure ensures that
-    the same passphrase produces different key material for
-    different engines.
+    RFC 3414 §2.6 / §A.2: the passphrase is first converted to a key with
+    the password-to-key algorithm of the user's authentication protocol and
+    then localized with the engine's snmpEngineID, so that the same
+    passphrase yields different key material per engine.
+
+    The hash of the *authentication* protocol is also used for privacy key
+    localization (RFC 3826 §1.2); pass ``key_length`` to truncate the result
+    to the size required by a privacy protocol.
 
     Args:
-        passphrase: The user's passphrase (up to 64 octets).
-        engine_id: The remote engine's engine ID.
-        auth_protocol: The authentication protocol to use.
+        passphrase: The user's passphrase (up to 255 octets are used).
+        engine_id: The remote engine's snmpEngineID (5-32 octets).
+        auth_protocol: The authentication protocol providing the hash.
+        key_length: Desired key length; defaults to the auth key length.
 
     Returns:
-        Localized key material (bytes).
+        The localized key material.
 
     Raises:
-        ValueError: If engine_id is less than 5 octets.
+        ValueError: If the protocol, passphrase or engine ID is invalid.
     """
-    passphrase_bytes = passphrase.encode("utf-8")[:64]
-
-    if not engine_id or len(engine_id) < 5:
-        raise ValueError("Engine ID must be at least 5 octets")
-
-    if auth_protocol == AuthProtocol.MD5:
-        hash_fn = md5
-    elif auth_protocol == AuthProtocol.SHA:
-        hash_fn = sha1
-    elif auth_protocol == AuthProtocol.SHA256:
-        hash_fn = sha256
-    else:
-        hash_fn = md5
-
-    localized = b""
-    for _ in range(10000):
-        localized += hash_fn(engine_id + passphrase_bytes + engine_id).digest()
-
-    return localized[:auth_protocol.get_digest_length()]
+    if auth_protocol == AuthProtocol.NONE:
+        raise ValueError("Cannot localize a passphrase without an authentication protocol")
+    if isinstance(passphrase, str):
+        passphrase = passphrase.encode("utf-8")
+    hash_name = auth_protocol.hash_name
+    ku = password_to_key(passphrase, hash_name)
+    if key_length is None:
+        key_length = auth_protocol.get_key_length()
+    return localize_key(ku, engine_id, hash_name, key_length)
 
 
 # =============================================================================
@@ -436,11 +680,13 @@ def localize_passphrase(
 # =============================================================================
 
 __all__ = [
-    "SecurityLevel",
     "AuthProtocol",
     "PrivProtocol",
+    "SecurityLevel",
+    "SecurityParameters",
     "USMUser",
     "USMUserDatabase",
-    "SecurityParameters",
+    "localize_key",
     "localize_passphrase",
+    "password_to_key",
 ]

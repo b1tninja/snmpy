@@ -115,7 +115,7 @@ class ScopedPDU:
         data = self.pdu if self.pdu else Null().get_object()
 
         # Encode as SEQUENCE using bytes() conversion
-        return Sequence.from_list([ctx_id, ctx_name, data])
+        return bytes(Sequence.from_list([ctx_id, ctx_name, data]))
 
     def decode(self, data: bytes) -> ScopedPDU:
         """Decode BER bytes into a ScopedPDU.

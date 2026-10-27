@@ -1,24 +1,26 @@
-"""SNMPv3 Message Authentication — RFC 3414 §3.2-3.2.2, RFC 7860.
+"""SNMPv3 Message Authentication — RFC 3414 §6/§7, RFC 7860.
 
 Provides:
-- CBC-SHA-96 authentication digest (RFC 3414 §3.2.1)
-- HMAC-SHA-256 authentication digest (RFC 7860)
+- HMAC-MD5-96 authentication digest (RFC 3414 §6)
+- HMAC-SHA-96 authentication digest (RFC 3414 §7; "CBC-SHA-96" here)
+- HMAC-SHA-224/256/384/512 authentication digests (RFC 7860)
 - Message Integrity Check (MIC) calculation
 - Authentication verification on incoming messages
 
-RFC 3414 §3.2 (Authentication Protocol):
+RFC 3414 §6 (HMAC-MD5-96) / §7 (HMAC-SHA-96):
     The authentication protocol provides message integrity and
     authentication. The algorithm computes a message integrity
-    check (MIC) using MD5 or SHA-1.
+    check (MIC) using MD5 or SHA-1, truncated to 12 octets.
 
-RFC 7860 (HMAC SHA2 Cryptographic Suite for SNMPv3):
-    Defines HMAC-SHA-224, HMAC-SHA-256, HMAC-SHA-384, HMAC-SHA-512
-    as additional authentication algorithms for SNMPv3.
+RFC 7860 (HMAC-SHA-2 Authentication Protocols in USM for SNMPv3):
+    Defines HMAC-SHA-224/256/384/512 authentication protocols.
+    The MAC is truncated to 16/24/32/48 octets respectively
+    (RFC 7860 §4) — not to the full digest size.
 
 Usage:
     >>> from snmp.auth import calculate_mic, verify_mic
-    >>> mic = calculate_mic(raw_message, auth_key, "SHA-96", engine_id)
-    >>> valid = verify_mic(raw_message, mic, auth_key, "SHA-96", engine_id)
+    >>> mic = calculate_mic(raw_message, auth_key, "CBC-SHA-96", engine_id)
+    >>> valid = verify_mic(raw_message, mic, auth_key, "CBC-SHA-96", engine_id)
 """
 
 from __future__ import annotations
@@ -41,14 +43,17 @@ class AuthProtocol:
     HMAC_SHA_512: str = "HMAC-SHA-512"
     CBC_MD5: str = "CBC-MD5"
 
-# Digest lengths per protocol (truncated MAC)
+# Truncated MAC lengths per protocol:
+# - HMAC-MD5-96 / HMAC-SHA-96: first 12 octets (RFC 3414 §6.3.1 / §7.3.1)
+# - HMAC-SHA-2 family: RFC 7860 §4 truncates to 128/192/256/384 bits,
+#   NOT to the full digest size.
 _AUTH_DIGEST_LENGTHS: dict[str, int] = {
-    AuthProtocol.CBC_SHA_96: 12,  # 96 bits = 12 bytes
-    AuthProtocol.HMAC_SHA_256: 32,  # 256 bits = 32 bytes
-    AuthProtocol.HMAC_SHA_224: 28,  # 224 bits = 28 bytes
-    AuthProtocol.HMAC_SHA_384: 48,  # 384 bits = 48 bytes
-    AuthProtocol.HMAC_SHA_512: 64,  # 512 bits = 64 bytes
-    AuthProtocol.CBC_MD5: 16,  # 128 bits = 16 bytes
+    AuthProtocol.CBC_SHA_96: 12,  # 96 bits = 12 bytes (RFC 3414 §7.3.1)
+    AuthProtocol.HMAC_SHA_256: 24,  # 192 bits (RFC 7860 §4)
+    AuthProtocol.HMAC_SHA_224: 16,  # 128 bits (RFC 7860 §4)
+    AuthProtocol.HMAC_SHA_384: 32,  # 256 bits (RFC 7860 §4)
+    AuthProtocol.HMAC_SHA_512: 48,  # 384 bits (RFC 7860 §4)
+    AuthProtocol.CBC_MD5: 12,  # 96 bits = 12 bytes (RFC 3414 §6.3.1)
 }
 
 # Hash function names
@@ -139,11 +144,11 @@ def verify_mic(
 
 
 # =============================================================================
-# CBC-SHA-96 Specific (RFC 3414 §3.2.1)
+# CBC-SHA-96 Specific (RFC 3414 §7 — HMAC-SHA-96)
 # =============================================================================
 
 def calculate_sha96_mic(message: bytes, auth_key: bytes, engine_id: bytes = b"") -> bytes:
-    """Calculate a CBC-SHA-96 MIC (RFC 3414 §3.2.1).
+    """Calculate a CBC-SHA-96 MIC (RFC 3414 §7.3.1).
 
     SHA-1 based authentication truncated to 96 bits.
 
@@ -186,7 +191,7 @@ def calculate_hmac_sha256_mic(message: bytes, auth_key: bytes, engine_id: bytes 
         engine_id: The sender's engine ID.
 
     Returns:
-        32-byte MIC.
+        24-byte MIC (RFC 7860 §4 truncates SHA-256 HMAC to 192 bits).
     """
     return calculate_mic(message, auth_key, AuthProtocol.HMAC_SHA_256, engine_id)
 
@@ -221,13 +226,13 @@ def calculate_hmac_sha512_mic(message: bytes, auth_key: bytes, engine_id: bytes 
 
 
 # =============================================================================
-# CBC-MD5 (RFC 3414 §3.2.2 — deprecated)
+# CBC-MD5 (RFC 3414 §6 — HMAC-MD5-96, deprecated in favor of SHA)
 # =============================================================================
 
 def calculate_md5_mic(message: bytes, auth_key: bytes, engine_id: bytes = b"") -> bytes:
-    """Calculate CBC-MD5 MIC (RFC 3414 §3.2.2).
+    """Calculate CBC-MD5 MIC (RFC 3414 §6.3.1).
 
-    MD5 based authentication truncated to 128 bits.
+    MD5-based HMAC truncated to 96 bits (12 octets) — HMAC-MD5-96.
     Deprecated in favor of SHA-96.
     """
     return calculate_mic(message, auth_key, AuthProtocol.CBC_MD5, engine_id)

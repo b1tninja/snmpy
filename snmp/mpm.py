@@ -26,26 +26,19 @@ Usage:
 
 from __future__ import annotations
 
-import os
-import struct
-from typing import Optional, Union
-
 from ber.object import (
-    Object,
-    ObjectIdentifier,
-    OctetString,
     Integer,
-    Sequence,
     Null,
+    Object,
+    OctetString,
+    Sequence,
 )
+from snmp.auth import calculate_mic
 from snmp.datagram import SNMPDatagram
-from snmp.pdus import GetRequest, GetNextRequest, GetResponse, SetRequest, Report, SNMPv2Trap, InformRequest
 from snmp.enums import SNMPVersion
-from snmp.usm import SecurityParameters, USMUser, USMUserDatabase
-from snmp.engine_id import SnmpEngineID, SnmpEngineIDGenerator
-from snmp.scoped_pdu import ScopedPDU
-from snmp.auth import calculate_mic, verify_mic, AuthenticationContext
 from snmp.privacy import PrivacyContext
+from snmp.scoped_pdu import ScopedPDU
+from snmp.usm import SecurityParameters, USMUser, USMUserDatabase
 
 # ---------------------------------------------------------------------------
 # SNMPv3 Message Processing Constants
@@ -103,8 +96,8 @@ class SNMPv3Message:
         self.msg_max_size = msg_max_size
         self.msg_flags = msg_flags
         self.msg_security_model = msg_security_model
-        self.security_parameters: Optional[SecurityParameters] = None
-        self.scoped_pdu: Optional[ScopedPDU] = None
+        self.security_parameters: SecurityParameters | None = None
+        self.scoped_pdu: ScopedPDU | None = None
 
     @property
     def security_level(self) -> int:
@@ -163,7 +156,7 @@ class MPv3:
     def __init__(
         self,
         engine_id: bytes,
-        user_db: Optional[USMUserDatabase] = None,
+        user_db: USMUserDatabase | None = None,
     ) -> None:
         """Initialize MPv3.
 
@@ -180,7 +173,7 @@ class MPv3:
         """Encode an SNMPv3 message to bytes with optional auth + privacy.
 
         RFC 3412 §5.1: The SNMPv3 message format with security parameters.
-        RFC 3414 §5: Authentication and Privacy processing.
+        RFC 3414 §2.5.1: USM services for generating an outgoing message.
 
         The encoding process:
         1. Apply privacy (encryption) to the ScopedPDU if privacy is enabled.
@@ -207,13 +200,17 @@ class MPv3:
 
         # Step 2: Apply privacy (encryption) to scoped PDU if enabled
         if message.is_privacy_enabled and priv_key:
-            priv_proto = priv_protocol or "des"
+            if not priv_protocol:
+                raise ValueError("authPriv requested but no privacy protocol is configured")
             privacy_ctx = PrivacyContext(
-                protocol=priv_proto,
+                protocol=priv_protocol,
                 privacy_key=priv_key,
-                engine_id=self.engine_id,
+                engine_boots=sec_params.engine_boots,
+                engine_time=sec_params.engine_time,
             )
             encrypted_data = privacy_ctx.encrypt(scoped_pdu_bytes)
+            # msgPrivacyParameters carries the salt that built the IV.
+            sec_params.priv_parameters = privacy_ctx.priv_parameters
         else:
             encrypted_data = scoped_pdu_bytes
 
@@ -290,7 +287,7 @@ class MPv3:
     def decode(self, raw: bytes) -> SNMPv3Message:
         """Decode raw bytes into an SNMPv3 message.
 
-        RFC 3414 §5: Authentication and Privacy processing.
+        RFC 3414 §2.5.2: USM services for processing an incoming message.
 
         The decoding process:
         1. Parse the message header, security parameters, and data.
@@ -395,7 +392,7 @@ class MPv3:
     def _authenticate(
         self,
         message: SNMPv3Message,
-        user: Optional[USMUser] = None,
+        user: USMUser | None = None,
     ) -> bool:
         """Authenticate an SNMPv3 message using USM.
 
@@ -412,15 +409,15 @@ class MPv3:
         if user.auth_protocol == "none":
             return True  # No authentication required
 
-        # TODO: Implement actual authentication (RFC 3414 §5)
-        # - CBC-SHA-96 (RFC 3414 §5)
+        # TODO: Implement actual authentication (RFC 3414 §6/§7)
+        # - HMAC-SHA-96 (RFC 3414 §7)
         # - HMAC-SHA-256 (RFC 7860)
         return True
 
     def _encrypt(
         self,
         message: SNMPv3Message,
-        user: Optional[USMUser] = None,
+        user: USMUser | None = None,
     ) -> bool:
         """Encrypt an SNMPv3 message using USM.
 
@@ -434,9 +431,9 @@ class MPv3:
         if not user or not user.privacy_enabled or not message.security_parameters:
             return False
 
-        # TODO: Implement actual encryption (RFC 3414 §5)
-        # - DES-CBC (RFC 3414 §3.3)
-        # - AES-CBC (RFC 3826-3828)
+        # TODO: Implement actual encryption (RFC 3414 §8)
+        # - DES-CBC (RFC 3414 §8)
+        # - AES-CBC (RFC 3826, RFC 7860)
         return True
 
 
@@ -566,7 +563,7 @@ class MessageProcessor:
     def __init__(
         self,
         engine_id: bytes = b"",
-        user_db: Optional[USMUserDatabase] = None,
+        user_db: USMUserDatabase | None = None,
     ) -> None:
         """Initialize the message processor.
 
@@ -627,9 +624,9 @@ class MessageProcessor:
 # ---------------------------------------------------------------------------
 
 __all__ = [
-    "SNMPv3Message",
     "MPv1",
     "MPv2c",
     "MPv3",
     "MessageProcessor",
+    "SNMPv3Message",
 ]
