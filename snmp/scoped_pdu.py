@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from ber.enums import TagClassEnum
 from ber.object import (
     Object,
     ObjectIdentifier,
@@ -35,8 +36,59 @@ from ber.object import (
     Sequence,
     Null,
 )
-from snmp.pdus import GetRequest, GetNextRequest, GetResponse, SetRequest, Report, SNMPv2Trap, InformRequest
+from snmp.pdus import (
+    GetBulkRequest,
+    GetNextRequest,
+    GetRequest,
+    GetResponse,
+    InformRequest,
+    PDU,
+    Report,
+    SetRequest,
+    SNMPv2Trap,
+)
 from snmp.enums import ErrorStatus
+
+
+# PDU classes keyed by context-specific tag_id (RFC 1905 §2), mirroring the
+# dispatch table SNMPDatagram maintains for v1/v2c messages.
+_PDU_BY_TAG: dict[int, type[PDU]] = {
+    pdu.tag_id: pdu
+    for pdu in (
+        GetRequest,
+        GetNextRequest,
+        GetResponse,
+        SetRequest,
+        GetBulkRequest,
+        InformRequest,
+        SNMPv2Trap,
+        Report,
+    )
+}
+
+
+def promote_pdu(data: Object) -> Object:
+    """Return the ScopedPDU ``data`` field as a typed PDU where possible.
+
+    ``SNMPDatagram.decode`` promotes its PDU to a :class:`~snmp.pdus.PDU`
+    subclass, which iterates as ``(oid, value)`` variable bindings.  ScopedPDU
+    decoding used to leave the raw BER ``Object`` here instead, so identical
+    varbind code worked over v2c and silently misbehaved over v3 — a raw PDU
+    object iterates its four BER fields, not its bindings.
+
+    Anything unrecognised (a non-context tag, an unknown PDU, an empty
+    varBindList) is returned unchanged rather than guessed at.
+    """
+    tag = getattr(data, "tag", None)
+    if tag is None or isinstance(data, PDU):
+        return data
+    # A universal INTEGER and a context-specific getResponse share tag_id 2.
+    if tag.tag_class != TagClassEnum.context_specific or tag.tag_id not in _PDU_BY_TAG:
+        return data
+    try:
+        return _PDU_BY_TAG[tag.tag_id].from_object(data)
+    except (AssertionError, IndexError, TypeError, ValueError):
+        return data
 
 
 # =============================================================================
@@ -143,7 +195,7 @@ class ScopedPDU:
                 self.context_name = (
                     ctx_name_obj.value.decode() if hasattr(ctx_name_obj, "value") else ""
                 )
-            self.pdu = data_obj
+            self.pdu = promote_pdu(data_obj)
 
         return self
 
@@ -201,7 +253,7 @@ class ScopedPDU:
             return cls(
                 context_engine_id=context_engine_id,
                 context_name=context_name,
-                pdu=data_obj,
+                pdu=promote_pdu(data_obj),
             )
 
         return cls()

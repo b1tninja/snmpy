@@ -226,6 +226,11 @@ class USMUser:
         priv_protocol: Privacy protocol (NONE, DES, AES, etc.).
         priv_passphrase: Privacy pass phrase (up to 64 octets).
         security_engine_id: The SNMP engine this user was discovered with.
+        auth_key: Pre-localized authentication key.  When set it is used
+            as-is and the pass phrase is not consulted — required for users
+            configured via usmUserAuthKeyChange, and a way to skip the
+            1-megabyte password-to-key stretch on every message.
+        priv_key: Pre-localized privacy key; same rules as ``auth_key``.
     """
 
     MAX_USERNAME_LEN: int = 32
@@ -239,6 +244,8 @@ class USMUser:
         priv_protocol: PrivProtocol = PrivProtocol.NONE,
         priv_passphrase: str | None = None,
         security_engine_id: bytes | None = None,
+        auth_key: bytes | None = None,
+        priv_key: bytes | None = None,
     ) -> None:
         """Initialize USM user credentials.
 
@@ -249,6 +256,10 @@ class USMUser:
             priv_protocol: Privacy protocol.
             priv_passphrase: Privacy pass phrase (up to 64 octets).
             security_engine_id: The SNMP engine this user was discovered with.
+            auth_key: Pre-localized authentication key (RFC 3414 §2.6), used
+                instead of localizing ``auth_passphrase``.
+            priv_key: Pre-localized privacy key, used instead of localizing
+                ``priv_passphrase``.
 
         Raises:
             ValueError: If username or passphrase exceeds maximum length.
@@ -271,6 +282,8 @@ class USMUser:
         self.priv_protocol = priv_protocol
         self.priv_passphrase = priv_passphrase
         self.security_engine_id = security_engine_id
+        self.auth_key = auth_key
+        self.priv_key = priv_key
 
     @property
     def security_level(self) -> SecurityLevel:

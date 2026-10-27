@@ -15,12 +15,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random as randint_mod
+import random
 from typing import Any, Optional
 
-import binascii
-
-from ber.object import Object
+from ber.object import (
+    Integer,
+    Null,
+    Object,
+    ObjectIdentifier,
+    OctetString,
+    Sequence,
+)
 from snmp import DEFAULT_PORT
 from snmp.statistics import get_statistics
 from snmp.datagram import SNMPDatagram
@@ -32,18 +37,12 @@ from snmp.pdus import (
     SetRequest,
     Trap,
     GetBulkRequest,
-    InformRequest,
-    SNMPv2Trap,
-    Report,
 )
-from snmp.security import (
-    AuthenticationError,
-    get_authentication_service,
-    MessageSizeLimit,
-)
-from snmp.mpm import MessageProcessor, SNMPv3Message
+from snmp.security import get_authentication_service
+from snmp.mpm import MessageProcessor, SNMPv3Message, USMError
 from snmp.enums import SNMPVersion
 from snmp.exceptions import BERDecodeError, SNMPProtocolError
+from snmp.usm import USMUserDatabase
 from snmp.vacm import VACMAccessControl
 
 logger = logging.getLogger(__name__)
@@ -74,17 +73,23 @@ class SNMPProtocol(asyncio.DatagramProtocol):
         self,
         engine_id: bytes = _DEFAULT_ENGINE_ID,
         vacm: Optional[VACMAccessControl] = None,
+        user_db: Optional[USMUserDatabase] = None,
     ) -> None:
         """Initialize SNMP protocol handler.
         
         Args:
             engine_id: SNMP engine ID for SNMPv3 (RFC 3411 §5).
             vacm: View-based Access Control model for access control.
+            user_db: USM user table used to authenticate SNMPv3 messages
+                (RFC 3414 §3.2 step 4). Without one, every incoming v3
+                message fails with unknownUserNames because no user can
+                ever be found.
         """
         self.transport: asyncio.DatagramTransport | None = None
         self.requests: dict[tuple[str, int], asyncio.Future[SNMPDatagram]] = {}
         self.engine_id: bytes = engine_id
         self._vacm: VACMAccessControl = vacm or VACMAccessControl()
+        self._user_db: USMUserDatabase = user_db or USMUserDatabase()
         self._message_processor: Optional[MessageProcessor] = None
 
     @property
@@ -95,10 +100,9 @@ class SNMPProtocol(asyncio.DatagramProtocol):
         and outgoing SNMP messages based on the version.
         """
         if self._message_processor is None:
-            from snmp.usm import USMUserDatabase
             self._message_processor = MessageProcessor(
                 engine_id=self.engine_id,
-                user_db=USMUserDatabase(),
+                user_db=self._user_db,
             )
         return self._message_processor
 
@@ -151,7 +155,9 @@ class SNMPProtocol(asyncio.DatagramProtocol):
             return self.message_processor.process_incoming(
                 data, version, addr[0], addr[1]
             )
-        elif version in (SNMPVersion.v2c, SNMPVersion.v2):
+        # SNMPVersion has v1/v2c/v3 only — testing for a "v2" member raised
+        # AttributeError on every non-v1 datagram before it could dispatch.
+        elif version == SNMPVersion.v2c:
             return self.message_processor.process_incoming(
                 data, version, addr[0], addr[1]
             )
@@ -161,9 +167,9 @@ class SNMPProtocol(asyncio.DatagramProtocol):
                 data, version, addr[0], addr[1]
             )
             # Extract SNMPDatagram from SNMPv3Message for compatibility
+            version_int = 3 if isinstance(msg, SNMPv3Message) else 0
             if isinstance(msg, SNMPv3Message) and msg.scoped_pdu and msg.scoped_pdu.pdu:
                 # Create a synthetic datagram with the PDU for compatibility
-                version_int = 3 if isinstance(msg, SNMPv3Message) else 0
                 from snmp.pdus import GetRequest as GR
                 if isinstance(msg.scoped_pdu.pdu, GR):
                     return SNMPDatagram(version=Integer.from_int(version_int).get_object(),
@@ -224,6 +230,33 @@ class SNMPProtocol(asyncio.DatagramProtocol):
                 return
         elif port == SNMP_AGENT_PORT or port > 1024:
             # Port 161 or ephemeral ports: standard request/response
+            if self.get_version_from_datagram(data) == SNMPVersion.v3:
+                # RFC 3414 §3.2: a v3 datagram must pass through USM.
+                # SNMPDatagram.decode expects the v1/v2c [version, community,
+                # pdu] framing, so without this branch every v3 message failed
+                # the decode below and was dropped as "malformed". §2.5.2 lets
+                # an agent report or discard a security failure; this engine
+                # discards and logs — MPv3.stats carries the usmStats counter.
+                try:
+                    self._process_incoming(data, addr)
+                except USMError as exc:
+                    stats.record_invalid_message()
+                    logger.warning(
+                        "USM rejected v3 message from %s: %s (stat %s)",
+                        host,
+                        exc,
+                        exc.stat or "n/a",
+                    )
+                    return
+                except (BERDecodeError, SNMPProtocolError, UnicodeDecodeError):
+                    stats.record_asn_parse_error()
+                    logger.warning(
+                        "v3 decode failed for packet from %s: malformed data",
+                        host,
+                    )
+                    return
+                stats.increment_incoming()
+                return
             # Validate message is not a trap on agent port
             try:
                 datagram = SNMPDatagram.decode(data)
@@ -396,9 +429,8 @@ class SNMPProtocol(asyncio.DatagramProtocol):
                 max_repetitions=10,
             )
         """
-        from snmp.pdus import GetBulkRequest as GBR
-        from ber.object import Sequence, ObjectIdentifier, Null
-        
+        # Sequence/ObjectIdentifier/Null come from the module imports now.
+
         # Build the variable binding list for the request
         var_binds = Sequence.from_list(
             [
@@ -508,8 +540,6 @@ class SNMPProtocol(asyncio.DatagramProtocol):
         
         RFC 1905 §4.2.3.1
         """
-        from ber.object import ObjectIdentifier
-        
         responses: list[tuple[Any, Any]] = []
         current_oid = starting_oid or system
 
@@ -530,7 +560,9 @@ class SNMPProtocol(asyncio.DatagramProtocol):
                 ),
             )
             datagram = SNMPDatagram(pdu=pdu)
-            datagram.pdu.request_id = Integer.from_int(randint(1 << 24, 1 << 31)).get_object()
+            datagram.pdu.request_id = Integer.from_int(
+                random.randint(1 << 24, 1 << 31)
+            ).get_object()
 
             try:
                 response = await asyncio.wait_for(
@@ -589,9 +621,8 @@ class SNMPProtocol(asyncio.DatagramProtocol):
         Raises:
             snmp.enums.ErrorStatus: If the response contains an error status.
         """
-        from ber.object import Object, Sequence, ObjectIdentifier, Null
         from snmp.enums import ErrorStatus
-        
+
         var_binds = Sequence.from_list(
             [
                 Sequence.from_list([

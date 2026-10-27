@@ -71,6 +71,7 @@ __all__ = [
     "priv_block_size",
     "priv_key_length",
     "priv_param_length",
+    "resolve_auth_protocol",
     "resolve_protocol",
 ]
 
@@ -313,6 +314,11 @@ def _resolve_auth_protocol(protocol: AuthProtocol | str) -> AuthProtocol:
     if resolved is None:
         raise PrivacyError(f"Unsupported authentication protocol: {protocol!r}")
     return resolved
+
+
+#: Public alias: normalize ``MD5``/``HMAC-SHA-96``/``1.3.6.1.6.3.10.1.1.3``
+#: and friends into an :class:`~snmp.usm.AuthProtocol`.
+resolve_auth_protocol = _resolve_auth_protocol
 
 
 def localize_privacy_key(
