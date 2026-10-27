@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=84.2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -36,15 +36,15 @@ Issues = "https://github.com/b1tninja/snmpy/issues"
 
 [project.optional-dependencies]
 crypto = [
-    "cryptography>=42.0.0",
+    "cryptography>=50.0.2",
 ]
 dev = [
-    "ruff>=0.9.0",
-    "mypy>=1.11.0",
-    "pytest>=8.0.0",
+    "ruff>=0.17.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
 ]
 examples = [
-    "psutil>=6.0.0",
+    "psutil>=7.2.2",
 ]
 
 [project.scripts]
