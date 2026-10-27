@@ -12,6 +12,7 @@ fact stated by those documents — no third-party encoder is trusted.
 from __future__ import annotations
 
 import unittest
+from importlib.util import find_spec
 
 from ber.object import Object
 from snmp.auth import calculate_mic
@@ -46,6 +47,10 @@ from snmp.usm import (
     USMUser,
     USMUserDatabase,
     localize_passphrase,
+)
+
+requires_crypto = unittest.skipUnless(
+    find_spec("cryptography") is not None, "requires the cryptography package"
 )
 
 # RFC 3414 §A.3 sample credentials.  The key derivation itself is pinned by
@@ -224,6 +229,7 @@ class TestMPv3Encode(unittest.TestCase):
                 mac, _ = split_message_mic(raw)
                 self.assertEqual(len(mac), length)
 
+    @requires_crypto
     def test_auth_priv_message(self) -> None:
         priv_key = localize_privacy_key(PASSPHRASE, ENGINE, "AES128", AuthProtocol.SHA)
         message = SNMPv3Message(msg_id=7, msg_flags=AUTH_FLAG | PRIV_FLAG)

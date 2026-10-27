@@ -45,7 +45,9 @@ jobs:
       - name: Install project and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          # "crypto" is what makes the AES/DES privacy tests run instead of
+          # silently skipping; keep it in the test matrix on purpose.
+          python -m pip install -e ".[dev,crypto]"
 
       - name: Run tests
         run: python -m pytest -q
